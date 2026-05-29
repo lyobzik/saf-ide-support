@@ -1,0 +1,110 @@
+# SmartApp DSL — плагин для IntelliJ IDEA
+
+Плагин добавляет поддержку DSL-сценариев фреймворка **Sber SmartApp Framework**
+(`smart_app_framework`) прямо в IDE. Сценарии этого фреймворка описываются не
+отдельным языком, а **JSON-файлами** в каталоге `static/references/` (подкаталоги
+`scenarios/`, `forms/`, `actions/`, `behaviors/`, `field_fillers/`,
+`classifiers/`). Плагин понимает их семантику и помогает с навигацией и
+редактированием.
+
+## Возможности
+
+- **Подсветка** ключевых слов (значения поля `type`) и структурных ключей.
+- **Переход к определению** сущности — Go to Definition / Ctrl+Click (⌘+Click).
+- **Поиск использований** — Find Usages / Alt+F7.
+- **Автодополнение** значений `type` и ссылочных ключей (`form`, `scenario`,
+  `filler`, `classifier`, `action`).
+- **Предупреждения** о неразрешённых ссылках (severity WARNING — не ошибка, так
+  как целевая сущность может быть ещё не создана).
+
+Плагин не вводит собственный язык или лексер, а строит семантический слой поверх
+встроенного JSON-парсера IDE. Поэтому работает в любой IDE на платформе IntelliJ,
+где есть бандл-плагин JSON (IDEA Community/Ultimate, PyCharm, GIGA IDE и др.).
+
+## Установка готового плагина
+
+Плагин в Marketplace пока не публикуется — устанавливается из ZIP-файла «с диска».
+
+1. **Получите ZIP-сборку плагина.** Файл называется
+   `smartapp-dsl-<версия>.zip` (например `smartapp-dsl-0.1.0.zip`):
+   - возьмите готовый артефакт из раздела релизов репозитория, **либо**
+   - соберите сами командой `./gradlew buildPlugin` — артефакт появится в
+     `build/distributions/smartapp-dsl-<версия>.zip` (см. «Сборка» ниже).
+2. В IDE откройте **Settings/Preferences → Plugins**.
+3. Нажмите на иконку шестерёнки ⚙ → **Install Plugin from Disk…**.
+4. Выберите скачанный/собранный ZIP-файл.
+5. Перезапустите IDE по запросу.
+
+После перезапуска откройте проект, содержащий каталог `static/references/…`, —
+подсветка, переход к определению, поиск использований и автодополнение заработают
+в JSON-файлах внутри этого каталога.
+
+> Минимальная версия платформы: build **233** (IDEA 2023.3) и новее.
+
+## Сборка из исходников
+
+> **Важно:** в системе может не быть отдельного JDK. Перед любой `gradle`-командой
+> экспортируйте `JAVA_HOME` на JBR из локальной IDE:
+>
+> ```bash
+> export JAVA_HOME="/Applications/GIGA IDE CE 2025.1.app/Contents/jbr/Contents/Home"
+> ```
+
+| Действие | Команда |
+|---|---|
+| Компиляция | `./gradlew compileKotlin` |
+| Тесты | `./gradlew test` |
+| Сборка ZIP-плагина | `./gradlew buildPlugin` → `build/distributions/smartapp-dsl-<версия>.zip` |
+| Запуск sandbox-IDE | `./gradlew runIde` |
+| Проверка совместимости | `./gradlew verifyPlugin` |
+
+Плагин компилируется и запускается против **локальной** IDE на платформе
+IntelliJ. Путь к ней задаётся параметром `localIdePath` в `gradle.properties`
+(по умолчанию — GIGA IDE) и переопределяется флагом:
+
+```bash
+./gradlew buildPlugin -PlocalIdePath="/path/to/IDE.app"
+```
+
+## Технологический стек
+
+- **Kotlin** 2.0.21 (JVM target 17)
+- **IntelliJ Platform Gradle Plugin** 2.16.0 (требует Gradle 9.0+)
+- **Gradle** 9.0.0 (через wrapper, ставить отдельно не нужно)
+- **JBR 21** из локальной IDE для компиляции и запуска
+- бандл-плагин `com.intellij.modules.json` (JSON PSI)
+- **gson** 2.11.0 — парсинг словаря ключевых слов
+- **JUnit 4** + `BasePlatformTestCase` — тесты
+
+## Словарь ключевых слов
+
+Список «ключевых слов» (допустимые значения `type`) генерируется из исходников
+фреймворка скриптом-генератором, который AST-парсит
+`smart_kit/resources/__init__.py`:
+
+```bash
+python tools/generate_keywords.py [путь-к-resources__init__.py]
+```
+
+Результат — `src/main/resources/keywords/keywords.json`. В репозитории лежит
+vendored-копия исходника фреймворка (`tools/vendor/`), поэтому генератор можно
+запускать без доступа к самому фреймворку. Перезапускайте генерацию при
+обновлении версии фреймворка.
+
+## Структура проекта
+
+```
+build.gradle.kts, settings.gradle.kts, gradle.properties   # сборка
+gradle/wrapper/, gradlew                                    # Gradle wrapper (9.0)
+tools/generate_keywords.py, tools/vendor/                   # генератор словаря
+src/main/kotlin/ru/sber/smartapp/dsl/                       # исходники плагина
+src/main/resources/META-INF/plugin.xml                      # дескриптор плагина
+src/main/resources/keywords/keywords.json                  # сгенерированный словарь
+src/test/kotlin/ru/sber/smartapp/dsl/                       # тесты
+docs/plans/, docs/insights/, arch/, mds/                    # материалы для AI-агентов
+```
+
+## Документация для разработчиков
+
+Подробное руководство (архитектура, ключевые компоненты, паттерны платформы,
+правила тестирования, формат коммитов, стиль кода) — в [AGENTS.md](AGENTS.md).
