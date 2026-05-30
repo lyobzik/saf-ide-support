@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Generate keywords.json for the SmartApp DSL IDEA plugin.
+"""Генерация keywords.json для плагина SmartApp DSL.
 
-Parses smart_kit/resources/__init__.py (the authoritative registry of the
-framework) via the `ast` module and collects every `type`-string keyword
-registered inside the `init_*` methods. AST parsing (not regex) is used so that
-`dict.update({...})`, single quotes, multiline literals and alias dicts are all
-handled.
+Разбирает smart_kit/resources/__init__.py (авторитетный реестр фреймворка)
+через модуль `ast` и собирает каждое строковое ключевое слово `type`,
+зарегистрированное внутри методов `init_*`. Используется именно AST-разбор, а
+не регэксп — так корректно обрабатываются `dict.update({...})`, одинарные
+кавычки, многострочные литералы и alias-словари.
 
-Usage:
-    python tools/generate_keywords.py [path-to-resources__init__.py] [-o out.json]
+Запуск:
+    python tools/generate_keywords.py [путь-к-resources__init__.py] [-o out.json]
 
-If no path is given, the vendored copy under tools/vendor/ is used so the
-result is reproducible offline.
+Если путь не задан, берётся vendored-копия из tools/vendor/, чтобы результат
+был воспроизводим офлайн.
 """
 import argparse
 import ast
@@ -21,7 +21,7 @@ import json
 import os
 import sys
 
-# Maps the registry dict variable name (module prefix stripped) -> plugin category.
+# Сопоставляет имя словаря-реестра (без префикса модуля) -> категорию плагина.
 DICT_TO_CATEGORY = {
     "actions": "action",
     "requirements": "requirement",
@@ -44,10 +44,10 @@ DEFAULT_OUT = os.path.join(
 
 
 def _subscript_base_name(target):
-    """Return the dict variable name for a Subscript target, prefix stripped.
+    """Имя словаря для Subscript-цели, без префикса модуля.
 
-    Handles both `actions[...]` (ast.Name) and `ffd.field_filler_description[...]`
-    (ast.Attribute).
+    Поддерживает и `actions[...]` (ast.Name), и
+    `ffd.field_filler_description[...]` (ast.Attribute).
     """
     value = target.value
     if isinstance(value, ast.Attribute):
@@ -58,10 +58,10 @@ def _subscript_base_name(target):
 
 
 def _const_str(node):
-    """Return the string value of a constant subscript key, else None.
+    """Строковое значение константного subscript-ключа, иначе None.
 
-    Tolerates the 3.8 ast.Index wrapper and ignores non-string keys such as
-    `dict[None] = ...` (defaults) or `dict[SomeClass] = ...`.
+    Учитывает обёртку ast.Index из 3.8 и игнорирует не-строковые ключи вида
+    `dict[None] = ...` (дефолты) или `dict[SomeClass] = ...`.
     """
     if isinstance(node, ast.Index):  # py3.8
         node = node.value
@@ -71,7 +71,7 @@ def _const_str(node):
 
 
 def _collect_from_dict_literal(dict_node):
-    """Yield string keys from a `{...}` literal (used by dict.update(...))."""
+    """Отдаёт строковые ключи из литерала `{...}` (для dict.update(...))."""
     if not isinstance(dict_node, ast.Dict):
         return
     for key in dict_node.keys:
@@ -87,7 +87,7 @@ def collect_keywords(source):
         if not (isinstance(node, ast.FunctionDef) and node.name.startswith("init_")):
             continue
         for stmt in ast.walk(node):
-            # Pattern A: dict["kw"] = Class
+            # Случай A: dict["kw"] = Class
             if isinstance(stmt, ast.Assign):
                 for tgt in stmt.targets:
                     if not isinstance(tgt, ast.Subscript):
@@ -99,7 +99,7 @@ def collect_keywords(source):
                     kw = _const_str(tgt.slice)
                     if kw is not None:
                         result[cat].add(kw)
-            # Pattern B: dict.update({...})
+            # Случай B: dict.update({...})
             elif isinstance(stmt, ast.Call):
                 func = stmt.func
                 if isinstance(func, ast.Attribute) and func.attr == "update":
