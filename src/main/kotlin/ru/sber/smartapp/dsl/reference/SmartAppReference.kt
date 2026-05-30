@@ -6,7 +6,7 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiElementResolveResult
 import com.intellij.psi.PsiPolyVariantReferenceBase
 import com.intellij.psi.ResolveResult
-import com.intellij.psi.search.GlobalSearchScope
+import ru.sber.smartapp.dsl.SmartAppScopes
 import ru.sber.smartapp.dsl.index.SmartAppDefinitionIndex
 
 /**
@@ -31,7 +31,7 @@ class SmartAppReference(
         if (name.isEmpty()) return ResolveResult.EMPTY_ARRAY
 
         val definitions = SmartAppDefinitionIndex.findDefinitions(
-            project, name, kinds, GlobalSearchScope.allScope(project),
+            project, name, kinds, SmartAppScopes.forElement(element),
         )
         if (definitions.isEmpty()) return ResolveResult.EMPTY_ARRAY
 

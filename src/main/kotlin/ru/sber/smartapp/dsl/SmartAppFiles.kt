@@ -26,6 +26,22 @@ object SmartAppFiles {
 
     fun isDslFile(file: VirtualFile?): Boolean = kindOf(file) != null
 
+    /**
+     * Каталог `references` (родитель каталогов видов) для [file], если файл
+     * лежит внутри `static/references/<kind>/...`. Нужен, чтобы ограничивать
+     * межфайловый резолв одним набором SmartApp-определений.
+     */
+    fun referencesRoot(file: VirtualFile?): VirtualFile? {
+        if (file == null) return null
+        var current: VirtualFile? = if (file.isDirectory) file else file.parent
+        while (current != null) {
+            val parent = current.parent
+            if (current.name == "references" && parent?.name == "static") return current
+            current = parent
+        }
+        return null
+    }
+
     /** Собирает сегменты пути от корня VFS вниз до [file] включительно. */
     private fun pathSegments(file: VirtualFile): List<String> {
         val segments = ArrayList<String>()

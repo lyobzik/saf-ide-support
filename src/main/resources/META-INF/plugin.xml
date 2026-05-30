@@ -29,6 +29,9 @@
         <fileBasedIndex
             implementation="ru.sber.smartapp.dsl.index.SmartAppDefinitionIndex"/>
 
+        <fileBasedIndex
+            implementation="ru.sber.smartapp.dsl.index.SmartAppNameIndex"/>
+
         <lang.findUsagesProvider
             language="JSON"
             implementationClass="ru.sber.smartapp.dsl.findusages.SmartAppFindUsagesProvider"/>

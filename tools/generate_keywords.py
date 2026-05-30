@@ -121,6 +121,15 @@ def _subscript_base_name_from_attr(value):
     return None
 
 
+def _reproducible_timestamp():
+    """ISO-время из SOURCE_DATE_EPOCH или None (для воспроизводимого вывода)."""
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if not epoch:
+        return None
+    ts = datetime.datetime.fromtimestamp(int(epoch), datetime.timezone.utc)
+    return ts.replace(microsecond=0).isoformat()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", nargs="?", default=DEFAULT_SRC,
@@ -138,15 +147,20 @@ def main(argv=None):
     counts = {cat: len(vals) for cat, vals in categories.items()}
     total_unique = len(set().union(*categories.values())) if categories else 0
 
+    meta = {
+        "source_file": "smart_kit/resources/__init__.py",
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
+        "counts": counts,
+        "total_unique_keywords": total_unique,
+    }
+    # Воспроизводимость: timestamp пишется только при заданном SOURCE_DATE_EPOCH,
+    # иначе одинаковый вход всегда даёт байт-в-байт одинаковый файл.
+    generated_at = _reproducible_timestamp()
+    if generated_at is not None:
+        meta["generated_at"] = generated_at
+
     payload = {
-        "_meta": {
-            "source_file": "smart_kit/resources/__init__.py",
-            "source_sha256": hashlib.sha256(raw).hexdigest(),
-            "generated_at": datetime.datetime.now(datetime.timezone.utc)
-            .replace(microsecond=0).isoformat(),
-            "counts": counts,
-            "total_unique_keywords": total_unique,
-        },
+        "_meta": meta,
         "categories": categories,
     }
 

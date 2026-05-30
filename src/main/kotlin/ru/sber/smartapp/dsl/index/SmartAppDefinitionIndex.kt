@@ -4,6 +4,7 @@ import com.intellij.json.psi.JsonFile
 import com.intellij.json.psi.JsonObject
 import com.intellij.json.psi.JsonProperty
 import com.intellij.json.psi.JsonStringLiteral
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiManager
 import com.intellij.psi.search.GlobalSearchScope
@@ -59,7 +60,11 @@ class SmartAppDefinitionIndex :
                 grouped.entries.associate { (name, offsets) ->
                     "${kind.name}:$name" to SmartAppDefinitionValue(offsets)
                 }
+            } catch (e: ProcessCanceledException) {
+                // Отмену индексации нельзя глотать — пробрасываем платформе.
+                throw e
             } catch (e: Exception) {
+                // Битый JSON/PSI: не валим индексацию проекта, просто пропускаем файл.
                 emptyMap()
             }
         }
@@ -99,26 +104,6 @@ class SmartAppDefinitionIndex :
                 }, scope)
             }
             return results
-        }
-
-        /** Все имена сущностей вида [kind] в области [scope] (для автодополнения). */
-        fun allNames(
-            project: Project,
-            kind: SmartAppRefKind,
-            scope: GlobalSearchScope = GlobalSearchScope.allScope(project),
-        ): List<String> {
-            val prefix = "${kind.name}:"
-            val fbi = FileBasedIndex.getInstance()
-            val names = LinkedHashSet<String>()
-            for (compositeKey in fbi.getAllKeys(NAME, project)) {
-                if (compositeKey.startsWith(prefix)) {
-                    // Оставляем только ключи, у которых реально есть значение в области поиска.
-                    var present = false
-                    fbi.processValues(NAME, compositeKey, null, { _, _ -> present = true; false }, scope)
-                    if (present) names.add(compositeKey.substring(prefix.length))
-                }
-            }
-            return names.toList()
         }
 
         private fun propertyAtOffset(file: JsonFile, offset: Int): JsonProperty? {

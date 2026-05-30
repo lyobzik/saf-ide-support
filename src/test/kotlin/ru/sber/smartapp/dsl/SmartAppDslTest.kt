@@ -220,6 +220,71 @@ class SmartAppDslTest : BasePlatformTestCase() {
         }
     }
 
+    // ---- расширенные правила ссылок ------------------------------------
+
+    fun testResolveBehaviorViaProcessBehavior() {
+        myFixture.addFileToProject(
+            "static/references/behaviors/greet.json",
+            """{ "greet_behavior": { "success_action": { "type": "sdk_answer" } } }""",
+        )
+        val file = addScenario(
+            "s_proc",
+            """"actions": [ { "type": "process_behavior", "behavior": "greet_behavior" } ]""",
+        )
+        assertResolvesToDefinition(file, "behavior", "greet_behavior", expected = 1)
+    }
+
+    fun testResolveClassifierWhenOwnerTypeIsClassifier() {
+        val form = myFixture.addFileToProject(
+            "static/references/forms/clf_form.json",
+            """
+            {
+              "clf_form": {
+                "type": "base",
+                "fields": {
+                  "x": {
+                    "type": "question",
+                    "filler": { "type": "classifier", "classifier": "my_classifier" }
+                  }
+                }
+              }
+            }
+            """.trimIndent(),
+        )
+        assertResolvesToDefinition(form, "classifier", "my_classifier", expected = 1)
+    }
+
+    // ---- контекст категории type (completion) --------------------------
+
+    fun testFieldTypeCompletionUsesFieldDescription() {
+        val items = completeAt(
+            "static/references/forms/comp_form.json",
+            """{ "comp_form": { "type": "base", "fields": { "name": { "type": "<caret>" } } } }""",
+        )
+        assertTrue("expected field_description keywords", items.contains("question"))
+        assertTrue(items.contains("integration"))
+        assertFalse("must not offer scenario types", items.contains("form_filling"))
+    }
+
+    fun testRequirementInsideFieldsUsesFieldRequirement() {
+        val items = completeAt(
+            "static/references/forms/req_form.json",
+            """{ "req_form": { "type": "base", "fields": { "age": { "type": "question", "requirement": { "type": "<caret>" } } } } }""",
+        )
+        assertTrue("expected field_requirement keywords", items.contains("comparison"))
+        assertTrue(items.contains("value_in_set"))
+        assertFalse("must not offer scenario-level requirements", items.contains("intersection"))
+    }
+
+    fun testRequirementAtScenarioLevelUsesRequirement() {
+        val items = completeAt(
+            "static/references/scenarios/req_scn.json",
+            """{ "req_scn": { "type": "form_filling", "requirement": { "type": "<caret>" } } }""",
+        )
+        assertTrue("expected scenario-level requirement keywords", items.contains("intersection"))
+        assertFalse("must not offer field_requirement keywords", items.contains("comparison"))
+    }
+
     // ---- вспомогательные методы -----------------------------------------
 
     private fun addScenario(name: String, body: String): PsiFile {

@@ -45,11 +45,19 @@ object SmartAppRefRules {
                 if (ownerType(owner) == "external") listOf(SmartAppRefKind.FILLER) else emptyList()
 
             "classifier" ->
-                if (ownerType(owner) == "external") listOf(SmartAppRefKind.CLASSIFIER) else emptyList()
+                // Внешний classifier по имени встречается и в external-обёртке, и в
+                // requirement'ах/filler'ах с type == classifier(_meta).
+                if (ownerType(owner) in CLASSIFIER_OWNER_TYPES) listOf(SmartAppRefKind.CLASSIFIER)
+                else emptyList()
 
             "action" ->
                 if (ownerType(owner) == "external")
                     listOf(SmartAppRefKind.ACTION, SmartAppRefKind.BEHAVIOR)
+                else emptyList()
+
+            "behavior" ->
+                // Behavior-ориентированные actions ссылаются на behavior по имени.
+                if (ownerType(owner) in BEHAVIOR_OWNER_TYPES) listOf(SmartAppRefKind.BEHAVIOR)
                 else emptyList()
 
             else -> emptyList()
@@ -58,6 +66,9 @@ object SmartAppRefRules {
 
     /** True, если [literal] стоит в любой ссылочной позиции. */
     fun isReference(literal: JsonStringLiteral): Boolean = targetKinds(literal).isNotEmpty()
+
+    private val CLASSIFIER_OWNER_TYPES = setOf("external", "classifier", "classifier_meta")
+    private val BEHAVIOR_OWNER_TYPES = setOf("process_behavior", "save_behavior")
 
     private fun ownerType(owner: JsonObject): String? {
         val typeValue = owner.findProperty("type")?.value as? JsonStringLiteral

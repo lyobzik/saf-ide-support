@@ -7,20 +7,19 @@ import com.intellij.codeInsight.completion.CompletionResultSet
 import com.intellij.codeInsight.completion.CompletionType
 import com.intellij.codeInsight.completion.PrioritizedLookupElement
 import com.intellij.codeInsight.lookup.LookupElementBuilder
-import com.intellij.json.psi.JsonArray
-import com.intellij.json.psi.JsonFile
-import com.intellij.json.psi.JsonObject
 import com.intellij.json.psi.JsonProperty
 import com.intellij.json.psi.JsonStringLiteral
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbService
 import com.intellij.patterns.PlatformPatterns
-import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.PsiFile
 import com.intellij.util.ProcessingContext
 import ru.sber.smartapp.dsl.SmartAppFiles
 import ru.sber.smartapp.dsl.SmartAppKeywords
 import ru.sber.smartapp.dsl.SmartAppRefKind
-import ru.sber.smartapp.dsl.index.SmartAppDefinitionIndex
+import ru.sber.smartapp.dsl.SmartAppScopes
+import ru.sber.smartapp.dsl.SmartAppTypeContext
+import ru.sber.smartapp.dsl.index.SmartAppNameIndex
 import ru.sber.smartapp.dsl.reference.SmartAppRefRules
 
 /**
@@ -65,7 +64,7 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
             return
         }
 
-        addNameVariants(literal, fileKind, result)
+        addNameVariants(literal, fileKind, parameters.originalFile, result)
     }
 
     private fun addKeywordVariants(
@@ -73,7 +72,7 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         fileKind: SmartAppRefKind,
         result: CompletionResultSet,
     ) {
-        val category = categoryForTypeContext(property, fileKind)
+        val category = SmartAppTypeContext.categoryFor(property, fileKind)
         val keywords = category?.let { SmartAppKeywords.all(it) }?.takeIf { it.isNotEmpty() }
             ?: SmartAppKeywords.allKeywords
 
@@ -90,6 +89,7 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
     private fun addNameVariants(
         literal: JsonStringLiteral,
         fileKind: SmartAppRefKind,
+        originalFile: PsiFile,
         result: CompletionResultSet,
     ) {
         val project = literal.project
@@ -98,9 +98,10 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         val kinds = SmartAppRefRules.targetKinds(literal, fileKind)
         if (kinds.isEmpty()) return
 
-        val scope = GlobalSearchScope.allScope(project)
+        // Scope считаем по оригинальному файлу: in-memory копия теряет реальный путь.
+        val scope = SmartAppScopes.forPsiFile(originalFile)
         for (kind in kinds) {
-            for (name in SmartAppDefinitionIndex.allNames(project, kind, scope)) {
+            for (name in SmartAppNameIndex.allNames(project, kind, scope)) {
                 result.addElement(
                     PrioritizedLookupElement.withPriority(
                         LookupElementBuilder.create(name).withTypeText(kind.name.lowercase()),
@@ -109,43 +110,6 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
                 )
             }
         }
-    }
-
-    /**
-     * Категория для значения `type` по «лучшему усилию»: смотрим ключ, под
-     * которым лежит объемлющий объект; при неудаче — откат к виду файла.
-     */
-    private fun categoryForTypeContext(property: JsonProperty, fileKind: SmartAppRefKind): String? {
-        val owner = property.parent as? JsonObject ?: return null
-        val containerKey = containerKeyOf(owner)
-        keyToCategory(containerKey)?.let { return it }
-        return fileKindCategory(fileKind)
-    }
-
-    private fun containerKeyOf(owner: JsonObject): String? {
-        return when (val parent = owner.parent) {
-            is JsonProperty -> parent.name
-            is JsonArray -> (parent.parent as? JsonProperty)?.name
-            else -> null
-        }
-    }
-
-    private fun keyToCategory(key: String?): String? = when (key) {
-        "filler" -> "filler"
-        "classifier" -> "classifier"
-        "action", "actions" -> "action"
-        "requirement", "requirements" -> "requirement"
-        "fields" -> "field_description"
-        else -> null
-    }
-
-    private fun fileKindCategory(kind: SmartAppRefKind?): String? = when (kind) {
-        SmartAppRefKind.SCENARIO -> "scenario"
-        SmartAppRefKind.FORM -> "form_description"
-        SmartAppRefKind.ACTION, SmartAppRefKind.BEHAVIOR -> "action"
-        SmartAppRefKind.FILLER -> "filler"
-        SmartAppRefKind.CLASSIFIER -> "classifier"
-        null -> null
     }
 
     private companion object {

@@ -2,7 +2,6 @@
   "_meta": {
     "source_file": "smart_kit/resources/__init__.py",
     "source_sha256": "8691107d51ac411adc6ee184d3220fd1730515eede3d000756e35d45ce2b6fae",
-    "generated_at": "2026-05-29T21:04:19+00:00",
     "counts": {
       "action": 42,
       "requirement": 33,

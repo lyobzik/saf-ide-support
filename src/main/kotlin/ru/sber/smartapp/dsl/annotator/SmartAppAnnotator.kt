@@ -8,9 +8,11 @@ import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbService
 import com.intellij.psi.PsiElement
-import com.intellij.psi.search.GlobalSearchScope
 import ru.sber.smartapp.dsl.SmartAppFiles
 import ru.sber.smartapp.dsl.SmartAppKeywords
+import ru.sber.smartapp.dsl.SmartAppRefKind
+import ru.sber.smartapp.dsl.SmartAppScopes
+import ru.sber.smartapp.dsl.SmartAppTypeContext
 import ru.sber.smartapp.dsl.index.SmartAppDefinitionIndex
 import ru.sber.smartapp.dsl.reference.SmartAppReferenceContributor
 import ru.sber.smartapp.dsl.reference.SmartAppRefRules
@@ -28,11 +30,11 @@ import ru.sber.smartapp.dsl.highlight.SmartAppTextAttributes
 class SmartAppAnnotator : Annotator, DumbAware {
 
     override fun annotate(element: PsiElement, holder: AnnotationHolder) {
-        if (SmartAppFiles.kindOf(element.containingFile) == null) return
+        val fileKind = SmartAppFiles.kindOf(element.containingFile) ?: return
 
         when (element) {
             is JsonProperty -> annotateStructuralKey(element, holder)
-            is JsonStringLiteral -> annotateStringValue(element, holder)
+            is JsonStringLiteral -> annotateStringValue(element, fileKind, holder)
         }
     }
 
@@ -45,12 +47,16 @@ class SmartAppAnnotator : Annotator, DumbAware {
         }
     }
 
-    private fun annotateStringValue(literal: JsonStringLiteral, holder: AnnotationHolder) {
+    private fun annotateStringValue(
+        literal: JsonStringLiteral,
+        fileKind: SmartAppRefKind,
+        holder: AnnotationHolder,
+    ) {
         val property = literal.parent as? JsonProperty ?: return
         if (property.value !== literal) return
 
         // Подсветка ключевого слова в значении type (чисто PSI, безопасно в dumb mode).
-        if (property.name == "type" && SmartAppKeywords.isAnyKeyword(literal.value)) {
+        if (property.name == "type" && isKeywordInContext(property, fileKind, literal.value)) {
             holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
                 .range(literal.textRange)
                 .textAttributes(SmartAppTextAttributes.KEYWORD)
@@ -59,6 +65,22 @@ class SmartAppAnnotator : Annotator, DumbAware {
         }
 
         annotateUnresolvedReference(literal, holder)
+    }
+
+    /**
+     * Контекстная проверка ключевого слова: если категория контейнера
+     * распознана — слово должно принадлежать именно ей (тип filler'а не должен
+     * подсвечиваться в позиции типа сценария); иначе — мягкий откат к
+     * принадлежности любой категории.
+     */
+    private fun isKeywordInContext(
+        property: JsonProperty,
+        fileKind: SmartAppRefKind,
+        value: String,
+    ): Boolean {
+        val category = SmartAppTypeContext.categoryFor(property, fileKind)
+        return if (category != null) SmartAppKeywords.isKeyword(category, value)
+        else SmartAppKeywords.isAnyKeyword(value)
     }
 
     private fun annotateUnresolvedReference(literal: JsonStringLiteral, holder: AnnotationHolder) {
@@ -74,7 +96,7 @@ class SmartAppAnnotator : Annotator, DumbAware {
         if (name.isEmpty()) return
 
         val definitions = SmartAppDefinitionIndex.findDefinitions(
-            project, name, kinds, GlobalSearchScope.allScope(project),
+            project, name, kinds, SmartAppScopes.forElement(literal),
         )
         if (definitions.isNotEmpty()) return
 
@@ -90,6 +112,7 @@ class SmartAppAnnotator : Annotator, DumbAware {
             "filler",
             "classifier",
             "action",
+            "behavior",
             "scenario",
             "scenario_description",
             "actions",
