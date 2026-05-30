@@ -16,8 +16,15 @@ import com.intellij.json.psi.JsonProperty
  */
 object SmartAppTypeContext {
 
-    private val CONTEXT_KEYS = setOf(
-        "filler", "classifier", "action", "actions",
+    // Ключи-контейнеры action-объектов: их type принадлежит категории action,
+    // даже если они вложены в описание поля (fields).
+    private val ACTION_KEYS = setOf(
+        "action", "actions",
+        "on_filled_actions", "success_action", "fail_action", "timeout_action",
+    )
+
+    private val CONTEXT_KEYS = ACTION_KEYS + setOf(
+        "filler", "classifier",
         "requirement", "requirements", "fields",
     )
 
@@ -31,13 +38,13 @@ object SmartAppTypeContext {
         val insideFields = "fields" in keys
 
         for (key in keys) {
-            when (key) {
-                "filler" -> return "filler"
-                "classifier" -> return "classifier"
-                "action", "actions" -> return "action"
-                "requirement", "requirements" ->
+            when {
+                key == "filler" -> return "filler"
+                key == "classifier" -> return "classifier"
+                key in ACTION_KEYS -> return "action"
+                key == "requirement" || key == "requirements" ->
                     return if (insideFields) "field_requirement" else "requirement"
-                "fields" -> return "field_description"
+                key == "fields" -> return "field_description"
             }
         }
         return fileKindCategory(fileKind)

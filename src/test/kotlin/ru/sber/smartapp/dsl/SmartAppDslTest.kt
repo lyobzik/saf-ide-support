@@ -285,6 +285,43 @@ class SmartAppDslTest : BasePlatformTestCase() {
         assertFalse("must not offer field_requirement keywords", items.contains("comparison"))
     }
 
+    fun testOnFilledActionsTypeCompletionUsesAction() {
+        val items = completeAt(
+            "static/references/forms/ofa_form.json",
+            """{ "ofa_form": { "type": "base", "fields": { "name": { "type": "question", "on_filled_actions": [ { "type": "<caret>" } ] } } } }""",
+        )
+        assertTrue("expected action keywords", items.contains("sdk_answer"))
+        assertTrue(items.contains("external"))
+        assertFalse("must not offer field_description here", items.contains("question"))
+    }
+
+    // ---- изоляция набора static/references (scope) ----------------------
+
+    fun testScopeIsolatesReferenceSets() {
+        myFixture.addFileToProject(
+            "projA/static/references/forms/iso.json",
+            """{ "iso_form": { "type": "base" } }""",
+        )
+        myFixture.addFileToProject(
+            "projB/static/references/forms/iso.json",
+            """{ "iso_form": { "type": "base" } }""",
+        )
+        val scnA = myFixture.addFileToProject(
+            "projA/static/references/scenarios/a.json",
+            """{ "a_scn": { "type": "form_filling", "form": "iso_form" } }""",
+        )
+        val literal = findLiteral(scnA, "form", "iso_form")
+        val ref = smartAppReference(literal) ?: error("no SmartAppReference on 'iso_form'")
+        val results = ref.multiResolve(false)
+        // iso_form определён в обоих наборах, но scope ограничен projA.
+        assertEquals("scope must isolate to projA", 1, results.size)
+        val prop = results[0].element as JsonProperty
+        assertTrue(
+            "resolved definition must come from projA",
+            prop.containingFile.virtualFile.path.contains("projA"),
+        )
+    }
+
     // ---- вспомогательные методы -----------------------------------------
 
     private fun addScenario(name: String, body: String): PsiFile {

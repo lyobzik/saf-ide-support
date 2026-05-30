@@ -30,8 +30,11 @@
 | `highlight/SmartAppTextAttributes` | Ключи цветовых атрибутов (`SMARTAPP_KEYWORD`, `SMARTAPP_FIELD`) |
 | `highlight/SmartAppColorSettingsPage` | Страница «SmartApp DSL» в Settings → Color Scheme |
 | `annotator/SmartAppAnnotator` | `DumbAware`-аннотатор: подсветка по PSI + WARNING на битых ссылках (ветка с индексом под dumb-guard) |
+| `SmartAppTypeContext` | Категория ключевых слов `type` по PSI-контексту (общая для completion и подсветки); `fields`→`field_description`, action-контейнеры→`action`, `requirement` внутри `fields`→`field_requirement` |
+| `SmartAppScopes` | Область поиска для резолва/completion — каталог `references` исходного файла (изоляция наборов `static/references`) |
 | `index/SmartAppDefinitionIndex` | `FileBasedIndexExtension` с составным ключом `"<KIND>:<name>"`, value = список offset'ов (сохраняет дубликаты ключей через PSI `getPropertyList()`) |
-| `index/SmartAppDefinitionValue` + `…Externalizer` | Значение индекса и его var-int сериализация (версия в `getVersion()`) |
+| `index/SmartAppNameIndex` | `FileBasedIndexExtension` с ключом = вид сущности, value = имена определений файла; для автодополнения имён без `getAllKeys`-скана |
+| `index/SmartAppDefinitionValue` + `…Externalizer` | Значение индекса определений и его var-int сериализация (версия в `getVersion()`) |
 | `reference/SmartAppRefRules` | Замороженная таблица правил «условие на узел → target kind(s)» |
 | `reference/SmartAppReference` | `PsiPolyVariantReferenceBase`, резолв через индекс (под dumb-guard) |
 | `reference/SmartAppReferenceContributor` | Навешивает ссылки на `JsonStringLiteral`; Jinja-guard (`{{`, `{%`) |
@@ -46,7 +49,8 @@
 
 ## Технологический стек
 
-- **Kotlin** 2.0.21 (JVM target 17 — для совместимости с `sinceBuild=233`)
+- **Kotlin** 2.0.21 (JVM target 21 — платформа 2025.1 требует Java 21)
+- целевая платформа: `sinceBuild=251` (IDEA 2025.1+), `untilBuild` не задан
 - **IntelliJ Platform Gradle Plugin** 2.16.0 (требует **Gradle 9.0+**)
 - **Gradle** 9.0.0 (через wrapper)
 - **JBR 21** из локального GIGA IDE (компиляция/запуск; см. «Окружение»)
@@ -135,8 +139,18 @@ docs/plans/, docs/insights/, arch/, mds/                    # материалы
   и не подсвечиваются как ошибка).
 - **Frozen rule table** (`SmartAppRefRules`) — единый источник правды для ссылок,
   unresolved-аннотаций и автодополнения имён.
-- **Версионирование индекса:** при изменении формата сериализации увеличивать
-  `SmartAppDefinitionExternalizer.SERIALIZATION_VERSION` (входит в `getVersion()`).
+- **Контекст категории `type`** (`SmartAppTypeContext`) — единый источник правды
+  для подсветки и автодополнения значений `type`: категория определяется
+  подъёмом по PSI, action-контейнеры (`actions`, `on_filled_actions`,
+  `success_action`…) дают `action` раньше, чем `fields`.
+- **Изоляция наборов** (`SmartAppScopes`) — резолв/completion ограничены
+  каталогом `references` исходного файла, чтобы в монорепо ссылки не утекали в
+  чужой `static/references`.
+- **Версионирование индексов:** при изменении формата сериализации увеличивать
+  `getVersion()` соответствующего индекса —
+  `SmartAppDefinitionExternalizer.SERIALIZATION_VERSION` для индекса определений
+  и `SmartAppNameIndex.getVersion()` для индекса имён (у каждого индекса свой
+  externalizer и версия).
 
 ### Использование SDK / платформы
 
