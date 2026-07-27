@@ -15,6 +15,7 @@ import com.intellij.util.io.DataInputOutputUtil
 import com.intellij.util.io.EnumeratorStringDescriptor
 import com.intellij.util.io.IOUtil
 import com.intellij.util.io.KeyDescriptor
+import ru.sber.smartapp.dsl.JsonPsi
 import ru.sber.smartapp.dsl.SmartAppFiles
 import ru.sber.smartapp.dsl.SmartAppRefKind
 import java.io.DataInput
@@ -36,7 +37,7 @@ class SmartAppNameIndex : FileBasedIndexExtension<String, List<String>>() {
 
     override fun getValueExternalizer(): DataExternalizer<List<String>> = NamesExternalizer
 
-    override fun getVersion(): Int = 1
+    override fun getVersion(): Int = 1 + CONTENT_VERSION
 
     override fun dependsOnFileContent(): Boolean = true
 
@@ -47,7 +48,15 @@ class SmartAppNameIndex : FileBasedIndexExtension<String, List<String>>() {
         DataIndexer { inputData ->
             try {
                 val kind = SmartAppFiles.kindOf(inputData.file) ?: return@DataIndexer emptyMap()
-                val root = (inputData.psiFile as? JsonFile)?.topLevelValue as? JsonObject
+                val jsonFile = inputData.psiFile as? JsonFile ?: return@DataIndexer emptyMap()
+                // Отбрасываем невалидный JSON до обхода propertyList. Часть ошибок
+                // парсер отмечает PsiErrorElement, но trailing-garbage после `}`
+                // (например `{ "a": {} } junk`) он молча игнорирует, без PSI-ошибки,
+                // достраивая корневой объект. Поэтому JsonPsi.hasError проверяет и
+                // PsiErrorElement, и значимый хвост после корневого значения — иначе
+                // валидный ключ из такого файла попал бы в индекс имён.
+                if (JsonPsi.hasError(jsonFile)) return@DataIndexer emptyMap()
+                val root = jsonFile.topLevelValue as? JsonObject
                     ?: return@DataIndexer emptyMap()
 
                 val names = LinkedHashSet<String>()
@@ -63,6 +72,14 @@ class SmartAppNameIndex : FileBasedIndexExtension<String, List<String>>() {
         }
 
     companion object {
+        /**
+         * Версия алгоритма индексирования (не формата сериализации). Повышается при
+         * изменении того, какие данные попадают в индекс. Сейчас учитывает ввод guard'а
+         * [JsonPsi.hasError]: без повышения версии persistent-индекс сохранил бы
+         * обрывочные ключи из битых файлов до их повторного изменения.
+         */
+        private const val CONTENT_VERSION = 1
+
         val NAME: ID<String, List<String>> =
             ID.create("ru.sber.smartapp.dsl.SmartAppNameIndex")
 
