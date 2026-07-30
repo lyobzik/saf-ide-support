@@ -32,6 +32,12 @@
         <fileBasedIndex
             implementation="ru.sber.smartapp.dsl.index.SmartAppNameIndex"/>
 
+        <fileBasedIndex
+            implementation="ru.sber.smartapp.dsl.index.SmartAppFormFieldIndex"/>
+
+        <fileBasedIndex
+            implementation="ru.sber.smartapp.dsl.index.SmartAppFormFieldNameIndex"/>
+
         <lang.findUsagesProvider
             language="JSON"
             implementationClass="ru.sber.smartapp.dsl.findusages.SmartAppFindUsagesProvider"/>
