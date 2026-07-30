@@ -69,12 +69,22 @@ class SmartAppFindUsagesTest : BasePlatformTestCase() {
         assertTrue("top-level form definition must allow Find Usages", provider.canFindUsagesFor(prop))
     }
 
-    // ---- F2: canFindUsagesFor отклоняет вложенное свойство --------------
+    // ---- F2: canFindUsagesFor для полей формы и произвольных вложенных ----
 
-    fun testFindUsagesProviderRejectsNestedProperty() {
-        val nested = findProperty("static/references/forms/forms.json", "name")
-        // "name" — поле формы (внутри fields), не top-level определение.
-        assertFalse("nested field property must NOT allow Find Usages", provider.canFindUsagesFor(nested))
+    fun testFindUsagesProviderAcceptsFormField() {
+        // Поле формы (внутри `fields`) — теперь first-class определение для
+        // Find Usages: на него навешены SmartAppFieldReference из Jinja.
+        val field = findProperty("static/references/forms/forms.json", "name")
+        assertTrue("form field must allow Find Usages", provider.canFindUsagesFor(field))
+        assertEquals("field", provider.getType(field))
+    }
+
+    fun testFindUsagesProviderRejectsArbitraryNestedProperty() {
+        // Произвольное вложенное свойство (не top-level и не поле формы) —
+        // отклоняется, его обрабатывает встроенный JSON-провайдер. `type` здесь —
+        // свойство внутри поля формы `name`.
+        val nested = findProperty("static/references/forms/forms.json", "type")
+        assertFalse("arbitrary nested property must NOT allow Find Usages", provider.canFindUsagesFor(nested))
     }
 
     // ---- F3: canFindUsagesFor отклоняет non-DSL файл -------------------
