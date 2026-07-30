@@ -20,10 +20,15 @@ import ru.sber.smartapp.dsl.SmartAppRefKind
 import ru.sber.smartapp.dsl.SmartAppScopes
 import ru.sber.smartapp.dsl.SmartAppTypeContext
 import ru.sber.smartapp.dsl.index.SmartAppNameIndex
+import ru.sber.smartapp.dsl.index.SmartAppFormFieldNameIndex
+import ru.sber.smartapp.dsl.reference.SmartAppFieldRef
 import ru.sber.smartapp.dsl.reference.SmartAppRefRules
+import ru.sber.smartapp.dsl.reference.SmartAppReferenceContributor
 
 /**
  * Дополняет строковые значения SmartApp DSL:
+ *  - внутри Jinja `{{ main_form.<caret> }}` -> имена полей целевой формы (ранняя
+ *    ветка, завершающая обработку, чтобы формы не предлагались как обычные имена);
  *  - в значении `type` -> ключевые слова категории объемлющего контейнера
  *    (чистое чтение ресурса, доступно во время индексации);
  *  - в значении ссылочного ключа (`form`, `scenario`, ...) -> имена сущностей
@@ -59,6 +64,14 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         val property = literal.parent as? JsonProperty ?: return
         if (property.value !== literal) return
 
+        // Ранняя Jinja-ветка: каретка внутри `{{ main_form.<caret> }}`. Должна
+        // идти первой и завершать обработку, иначе обычная ссылочная ветка ниже
+        // предложит формы в позиции, где ожидается имя поля.
+        if (SmartAppReferenceContributor.isJinja(literal.value)) {
+            addFieldVariants(literal, fileKind, parameters.originalFile, parameters, result)
+            return
+        }
+
         if (property.name == "type") {
             addKeywordVariants(property, fileKind, result)
             return
@@ -81,6 +94,58 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
                 PrioritizedLookupElement.withPriority(
                     LookupElementBuilder.create(keyword).withTypeText("type"),
                     KEYWORD_PRIORITY,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Имена полей формы для автодополнения внутри `{{ main_form.<caret> }}`.
+     * Целевая форма определяется через [SmartAppFieldRef.targetFormOf]; если форма
+     * неизвестна (динамический `form`) — варианты не предлагаются.
+     *
+     * [fileKind]/[originalFile] берутся снаружи, т.к. `targetFormOf`/scope опираются
+     * на реальный путь файла, а completion работает на in-memory копии, этот путь
+     * теряющей.
+     */
+    private fun addFieldVariants(
+        literal: JsonStringLiteral,
+        fileKind: SmartAppRefKind,
+        originalFile: PsiFile,
+        parameters: CompletionParameters,
+        result: CompletionResultSet,
+    ) {
+        val project = literal.project
+        if (DumbService.isDumb(project)) return
+
+        // Позиция каретки в raw-координатах литерала (без кавычек).
+        val rawCaret = parameters.offset - literal.textOffset - 1
+        if (rawCaret < 0) return
+        val raw = SmartAppReferenceContributor.rawText(literal) ?: return
+        if (rawCaret > raw.length) return
+        val prefix = raw.substring(0, rawCaret)
+        // Ищем последнее открытое выражение `{{ ... main_form.` перед кареткой
+        // (без закрывающего `}}` — completion обычно в неполненном коде).
+        val open = prefix.lastIndexOf("{{")
+        if (open < 0) error("DIAG no open: rawCaret=$rawCaret raw='$raw' prefix='$prefix'")
+        val afterOpen = prefix.substring(open + 2)
+        // Между `{{` и кареткой должен быть ровно `main_form.` (с допуском пробелов).
+        // containsMatchIn: completion подставляет dummy после точки, matches требовал
+        // бы пустой хвост.
+        if (!MAIN_FORM_PREFIX.containsMatchIn(afterOpen)) return
+
+        val form = SmartAppFieldRef.targetFormOf(literal, fileKind) ?: return
+        val scope = SmartAppScopes.forPsiFile(originalFile)
+        // Prefix перед кареткой — содержимое после последней точки в `main_form.`,
+        // иначе платформа отфильтрует варианты по всему `main_form.` и они не
+        // совпадут с именами полей.
+        val fieldPrefix = prefix.substringAfterLast('.')
+        val fieldResult = result.withPrefixMatcher(fieldPrefix)
+        for (field in SmartAppFormFieldNameIndex.allNames(project, form, scope)) {
+            fieldResult.addElement(
+                PrioritizedLookupElement.withPriority(
+                    LookupElementBuilder.create(field).withTypeText("field"),
+                    FIELD_PRIORITY,
                 ),
             )
         }
@@ -115,5 +180,12 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
     private companion object {
         const val KEYWORD_PRIORITY = 100.0
         const val NAME_PRIORITY = 50.0
+        const val FIELD_PRIORITY = 30.0
+
+        // Префикс между `{{` и кареткой, открывающий completion имени поля:
+        // опциональные пробелы, `main_form`, опциональные пробелы, точка. Используем
+        // containsMatchIn, а не matches: completion подставляет dummy-идентификатор
+        // на место каретки, поэтому после точки ещё есть текст.
+        val MAIN_FORM_PREFIX: Regex = Regex("""^\s*main_form\s*\.\s*""")
     }
 }
