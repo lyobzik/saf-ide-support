@@ -20,4 +20,34 @@ object SmartAppTextAttributes {
         "SMARTAPP_FIELD",
         DefaultLanguageHighlighterColors.INSTANCE_FIELD,
     )
+
+    /** `{{`, `}}`, `{%`, `%}` — разделители Jinja-выражений. */
+    val JINJA_DELIM: TextAttributesKey = TextAttributesKey.createTextAttributesKey(
+        "SMARTAPP_JINJA_DELIM",
+        DefaultLanguageHighlighterColors.BRACES,
+    )
+
+    /** Переменная/идентификатор внутри Jinja (`main_form`, имя поля, имя фильтра). */
+    val JINJA_VAR: TextAttributesKey = TextAttributesKey.createTextAttributesKey(
+        "SMARTAPP_JINJA_VAR",
+        DefaultLanguageHighlighterColors.IDENTIFIER,
+    )
+
+    /** Оператор `.` (доступ к полю объекта) внутри Jinja. */
+    val JINJA_OP: TextAttributesKey = TextAttributesKey.createTextAttributesKey(
+        "SMARTAPP_JINJA_OP",
+        DefaultLanguageHighlighterColors.DOT,
+    )
+
+    /** Оператор фильтра `|` внутри Jinja. */
+    val JINJA_FILTER: TextAttributesKey = TextAttributesKey.createTextAttributesKey(
+        "SMARTAPP_JINJA_FILTER",
+        DefaultLanguageHighlighterColors.OPERATION_SIGN,
+    )
+
+    /** Строковый литерал внутри Jinja (`"…"`) с escape-последовательностями. */
+    val JINJA_STRING: TextAttributesKey = TextAttributesKey.createTextAttributesKey(
+        "SMARTAPP_JINJA_STRING",
+        DefaultLanguageHighlighterColors.STRING,
+    )
 }
