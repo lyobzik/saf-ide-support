@@ -124,15 +124,21 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         val raw = SmartAppReferenceContributor.rawText(literal) ?: return
         if (rawCaret > raw.length) return
         val prefix = raw.substring(0, rawCaret)
-        // Ищем последнее открытое выражение `{{ ... main_form.` перед кареткой
-        // (без закрывающего `}}` — completion обычно в неполненном коде).
-        val open = prefix.lastIndexOf("{{")
-        if (open < 0) error("DIAG no open: rawCaret=$rawCaret raw='$raw' prefix='$prefix'")
-        val afterOpen = prefix.substring(open + 2)
+
+        // Каретка должна быть внутри актуальной интерполяции {{ … }}: ищем
+        // последний разделитель перед кареткой и убеждаемся, что это `{{` (не
+        // `{%`), и что после него до каретки не было закрывающего `}}`. Иначе
+        // completion полей активировался бы и в `"{{ main_form.name }}.<caret>"`,
+        // и внутри `{% … %}`.
+        val lastInterpOpen = prefix.lastIndexOf("{{")
+        val lastStmtOpen = prefix.lastIndexOf("{%")
+        if (lastInterpOpen < 0 || lastInterpOpen < lastStmtOpen) return
+        val afterInterp = prefix.substring(lastInterpOpen + 2)
+        if (afterInterp.contains("}}")) return // интерполяция уже закрыта — каретка вне её
         // Между `{{` и кареткой должен быть ровно `main_form.` (с допуском пробелов).
         // containsMatchIn: completion подставляет dummy после точки, matches требовал
         // бы пустой хвост.
-        if (!MAIN_FORM_PREFIX.containsMatchIn(afterOpen)) return
+        if (!MAIN_FORM_PREFIX.containsMatchIn(afterInterp)) return
 
         val form = SmartAppFieldRef.targetFormOf(literal, fileKind) ?: return
         val scope = SmartAppScopes.forPsiFile(originalFile)

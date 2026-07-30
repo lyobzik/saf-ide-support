@@ -1,29 +1,37 @@
 package ru.sber.smartapp.dsl.reference
 
 import com.intellij.openapi.util.TextRange
-import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.DELIM_CLOSE
-import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.DELIM_OPEN
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.DOT
+import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.FILTER_NAME
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.FILTER_OP
+import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.INTERP_CLOSE
+import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.INTERP_OPEN
+import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.STATEMENT_CLOSE
+import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.STATEMENT_OPEN
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.STRING
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.TEXT
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.VAR
 
 /**
- * Токен Jinja-фрагмента внутри строкового литерала. Смещения [range] заданы
- * относительно **raw-текста** литерала (без JSON-кавычек) — см.
- * [SmartAppJinjaLexer].
+ * Тип токена Jinja-фрагмента внутри строкового JSON-литерала. Все смещения
+ * токена (см. [SmartAppJinjaToken.range]) заданы относительно **decoded**-текста
+ * литерала (JSON-строка с раскрытыми escape, без крайних кавычек) — того, что
+ * пользователь фактически видит как Jinja.
  */
-data class SmartAppJinjaToken(val type: SmartAppJinjaTokenType, val range: TextRange)
-
 enum class SmartAppJinjaTokenType {
-    /** `{{` или `{%` — открывающий разделитель выражения. */
-    DELIM_OPEN,
+    /** `{{` — открывающий разделитель интерполяции (семантического выражения). */
+    INTERP_OPEN,
 
-    /** `}}` или `%}` — закрывающий разделитель выражения. */
-    DELIM_CLOSE,
+    /** `}}` — закрывающий разделитель интерполяции. */
+    INTERP_CLOSE,
 
-    /** Идентификатор-переменная (`main_form`, имя поля, имя фильтра, прочие). */
+    /** `{%` — открывающий разделитель statement-тега (только подсветка). */
+    STATEMENT_OPEN,
+
+    /** `%}` — закрывающий разделитель statement-тега. */
+    STATEMENT_CLOSE,
+
+    /** Идентификатор-переменная (`main_form`, имя поля). */
     VAR,
 
     /** Одиночная точка — доступ к полю объекта. */
@@ -32,75 +40,103 @@ enum class SmartAppJinjaTokenType {
     /** `|` — оператор применения фильтра. */
     FILTER_OP,
 
-    /** Строковый литерал внутри Jinja (`"…"` / `'…'` с учётом escape). */
+    /** Имя фильтра (идентификатор сразу после [FILTER_OP]). */
+    FILTER_NAME,
+
+    /** Строковый литерал внутри Jinja (`"…"` / `'…'`). */
     STRING,
 
-    /** Любой прочий текст (внутри `{{ }}` и снаружи выражений). */
+    /** Любой прочий текст (внутри выражения и снаружи). */
     TEXT,
 }
+
+/** Токен с типом и диапазоном относительно decoded-текста литерала. */
+data class SmartAppJinjaToken(val type: SmartAppJinjaTokenType, val range: TextRange)
+
+/**
+ * Кандидат на семантическую ссылку `main_form.<field>` внутри интерполяции.
+ * [fieldRange] — диапазон имени поля в decoded-координатах литерала.
+ */
+data class SmartAppFieldCandidate(val form: String, val field: String, val fieldRange: TextRange)
 
 /**
  * Детерминированный лексер Jinja-фрагментов внутри строкового JSON-литерала.
  *
  * **Не полноценный Jinja-парсер**, а токенизатор для двух целей:
- * 1. Найти семантические ссылки `main_form.<id>` для резолва/completion.
- * 2. Разметить токены для подсветки (разделители, переменные, фильтры, строки).
+ * 1. Найти семантические ссылки `main_form.<id>` — только внутри интерполяции
+ *    `{{ … }}` (statement-теги `{% … %}` подсвечиваются, но ссылок не порождают).
+ * 2. Разметить токены для подсветки.
  *
- * Контракт (см. план `2026-07-25-form-fields-and-jinja.md`, шаг 3):
- * - учитываются только **парные** `{{ … }}` и `{% … %}`; непарный разделитель до
- *   конца литерала не образует выражения — остаток целиком `TEXT`, ошибкой не
- *   становится;
- * - несколько фрагментов в одном литерале обрабатываются независимо;
- * - внутри выражения идентификаторы внутри [STRING] **не** токенизируются
- *   (`{{ "main_form.name" }}` → один `STRING`, а не `VAR`);
- * - `{% … %}` подсвечивается, но **не** порождает семантических ссылок.
+ * Контракт:
+ * - разделители учитываются только парные, вне строковых литералов Jinja
+ *   (`{{ '}}' }}` корректно — `}}` внутри строки не закрывает выражение);
+ * - JSON escape (`\"`, `\\`, …) раскрываются до токенизации тел, поэтому Jinja с
+ *   двойными строками в JSON-представлении
+ *   `"{{ x | default(\"y\") }}"` разбирается верно;
+ * - несколько фрагментов обрабатываются независимо;
+ * - внутри выражения идентификаторы внутри [SmartAppJinjaTokenType.STRING]
+ *   **не** токенизируются (`{{ "main_form.name" }}` → один STRING);
+ * - `{% … %}` — **только лексическая подсветка**, без семантических ссылок;
+ * - после `|` идентификатор помечается [SmartAppJinjaTokenType.FILTER_NAME].
  *
- * Все смещения [SmartAppJinjaToken.range] — относительно [rawText], переданного в
- * [tokenize]: raw-текст литерала без JSON-кавычек. Перевод в absolute-диапазоны
- * документа — ответственность вызывающего (см. комментарий к [tokenize]).
+ * Все смещения — относительно [decodedText], переданного в [tokenize]. Перевод в
+ * absolute-диапазоны документа — ответственность вызывающего через карту
+ * raw→decoded (см. [JsonStringLiteralDecoder]).
  */
 object SmartAppJinjaLexer {
 
     /**
-     * Токенизирует [rawText] (содержимое строкового литерала без крайних кавычек).
-     * Возвращает упорядоченный список токенов; пустой, если Jinja-фрагментов нет.
-     *
-     * Перевод raw-диапазона токена в absolute: `literal.textOffset + 1 + rawStart`
-     * ( +1 за открывающую JSON-кавычку).
+     * Токенизирует [decodedText] (содержимое литерала без крайних кавычек, с
+     * раскрытыми JSON escape). Возвращает упорядоченный список токенов.
      */
-    fun tokenize(rawText: String): List<SmartAppJinjaToken> {
+    fun tokenize(decodedText: String): List<SmartAppJinjaToken> {
         val tokens = ArrayList<SmartAppJinjaToken>()
         var i = 0
-        val n = rawText.length
+        val n = decodedText.length
         while (i < n) {
-            val open = findOpenDelim(rawText, i) ?: run {
-                // До конца литерала больше нет открывающих разделителей —
-                // оставшийся хвост один TEXT-токен.
+            val open = findOpenDelim(decodedText, i) ?: run {
                 if (i < n) tokens.add(token(TEXT, i, n))
                 return tokens
             }
-            // Текст перед выражением.
             if (open.start > i) tokens.add(token(TEXT, i, open.start))
-            val close = findCloseDelim(rawText, open.end, open.type)
+            val close = findCloseDelim(decodedText, open.end, open.kind)
             if (close == null) {
                 // Непарный разделитель: весь остаток — TEXT, ошибкой не отмечаем.
                 tokens.add(token(TEXT, open.start, n))
                 return tokens
             }
-            tokens.add(token(DELIM_OPEN, open.start, open.end))
-            tokenizeExpr(rawText, open.end, close.start, tokens)
-            tokens.add(token(DELIM_CLOSE, close.start, close.end))
+            tokens.add(token(open.openType, open.start, open.end))
+            tokenizeExpr(decodedText, open.end, close.start, tokens)
+            tokens.add(token(open.closeType, close.start, close.end))
             i = close.end
         }
         return tokens
     }
 
     /**
-     * Токенизирует внутренность `{{ … }}` / `{% … %}` — диапазон `(from, until)`,
-     * не включая разделители. Идентификаторы внутри [STRING] не выделяются.
+     * Находит семантические кандидаты `main_form.<id>` внутри интерполяций
+     * `{{ … }}` (statement-теги `{% … %}` исключены). Допускает whitespace между
+     * `main_form`, `.` и именем поля. Возвращает кандидаты в порядке встречи.
      */
+    fun fieldCandidates(decodedText: String): List<SmartAppFieldCandidate> {
+        val tokens = tokenize(decodedText)
+        var i = 0
+        while (i < tokens.size) {
+            val t = tokens[i]
+            if (t.type == INTERP_OPEN) {
+                // Ищем внутри этой интерполяции последовательность VAR(main_form)
+                // DOT VAR(field), допуская TEXT (whitespace) между ними.
+                return collectFromInterp(decodedText, tokens, i)
+            }
+            i++
+        }
+        return emptyList()
+    }
+
+    /** Токенизирует тело выражения — диапазон (from, until) без разделителей. */
     private fun tokenizeExpr(text: String, from: Int, until: Int, out: ArrayList<SmartAppJinjaToken>) {
         var i = from
+        var afterFilter = false
         while (i < until) {
             val c = text[i]
             when {
@@ -108,14 +144,18 @@ object SmartAppJinjaLexer {
                     val start = i
                     while (i < until && text[i].isWhitespace()) i++
                     out.add(token(TEXT, start, i))
+                    // afterFilter намеренно не сбрасываем: имя фильтра может
+                    // стоять через whitespace после `|`.
                 }
                 c == '.' -> {
                     out.add(token(DOT, i, i + 1))
                     i++
+                    afterFilter = false
                 }
                 c == '|' -> {
                     out.add(token(FILTER_OP, i, i + 1))
                     i++
+                    afterFilter = true
                 }
                 c == '"' || c == '\'' -> {
                     val start = i
@@ -127,12 +167,14 @@ object SmartAppJinjaLexer {
                         i++
                     }
                     out.add(token(STRING, start, i))
+                    afterFilter = false
                 }
                 c.isJavaIdentifierStart() -> {
                     val start = i
                     i++
                     while (i < until && text[i].isJavaIdentifierPart()) i++
-                    out.add(token(VAR, start, i))
+                    out.add(token(if (afterFilter) FILTER_NAME else VAR, start, i))
+                    afterFilter = false
                 }
                 else -> {
                     val start = i
@@ -143,35 +185,121 @@ object SmartAppJinjaLexer {
                     ) {
                         i++
                     }
-                    if (i == start) i++ // гарантия прогресса на непонятном символе
+                    if (i == start) i++
                     out.add(token(TEXT, start, i))
+                    afterFilter = false
                 }
             }
         }
     }
 
-    private data class OpenDelim(val start: Int, val end: Int, val type: Char /* '{' или '%' */)
+    /**
+     * Собирает кандидатов из одной интерполяции, начатой токеном [interpStartIdx]
+     * (INTERP_OPEN). Допускает несколько вхождений `main_form.<field>` в одном
+     * выражении и несколько интерполяций в литерале.
+     */
+    private fun collectFromInterp(
+        text: String,
+        tokens: List<SmartAppJinjaToken>,
+        interpStartIdx: Int,
+    ): List<SmartAppFieldCandidate> {
+        val result = ArrayList<SmartAppFieldCandidate>()
+        var j = interpStartIdx + 1
+        while (j < tokens.size) {
+            val t = tokens[j]
+            if (t.type == INTERP_CLOSE) break
+            if (t.type == STATEMENT_OPEN) {
+                // Вложенные statement-теги теоретически невозможны внутри {{ }},
+                // но защитно пропускаем их тело.
+                break
+            }
+            if (t.type == VAR && text.substring(t.range.startOffset, t.range.endOffset) == "main_form") {
+                val dot = nextNonText(tokens, j + 1)
+                val field = if (dot != null && dot.type == DOT) nextNonText(tokens, tokens.indexOf(dot) + 1) else null
+                if (field != null && field.type == VAR) {
+                    val fieldName = text.substring(field.range.startOffset, field.range.endOffset)
+                    result.add(SmartAppFieldCandidate("main_form", fieldName, field.range))
+                    j = tokens.indexOf(field) + 1
+                    continue
+                }
+            }
+            j++
+        }
+        // Рекурсивно обрабатываем остальные интерполяции в литерале.
+        result += scanMoreInterps(text, tokens, j)
+        return result
+    }
+
+    /** Собирает кандидатов из интерполяций после позиции [afterIdx]. */
+    private fun scanMoreInterps(text: String, tokens: List<SmartAppJinjaToken>, afterIdx: Int): List<SmartAppFieldCandidate> {
+        var k = afterIdx
+        while (k < tokens.size) {
+            if (tokens[k].type == INTERP_OPEN) {
+                return collectFromInterp(text, tokens, k)
+            }
+            k++
+        }
+        return emptyList()
+    }
+
+    /** Следующий токен, пропуская TEXT (whitespace). */
+    private fun nextNonText(tokens: List<SmartAppJinjaToken>, fromIdx: Int): SmartAppJinjaToken? {
+        var k = fromIdx
+        while (k < tokens.size) {
+            val t = tokens[k]
+            if (t.type != TEXT) return t
+            k++
+        }
+        return null
+    }
+
+    private enum class DelimKind { INTERP, STATEMENT }
+
+    private data class OpenDelim(val start: Int, val end: Int, val kind: DelimKind) {
+        val openType: SmartAppJinjaTokenType get() =
+            if (kind == DelimKind.INTERP) INTERP_OPEN else STATEMENT_OPEN
+        val closeType: SmartAppJinjaTokenType get() =
+            if (kind == DelimKind.INTERP) INTERP_CLOSE else STATEMENT_CLOSE
+    }
 
     private data class CloseDelim(val start: Int, val end: Int)
 
+    /** Находит `{{` или `{%`, начиная с [from]; иначе `null`. */
     private fun findOpenDelim(text: String, from: Int): OpenDelim? {
         val n = text.length
         var i = from
         while (i < n - 1) {
-            if (text[i] == '{' && text[i + 1] == '{') return OpenDelim(i, i + 2, '{')
-            if (text[i] == '{' && text[i + 1] == '%') return OpenDelim(i, i + 2, '%')
+            if (text[i] == '{') {
+                if (text[i + 1] == '{') return OpenDelim(i, i + 2, DelimKind.INTERP)
+                if (text[i + 1] == '%') return OpenDelim(i, i + 2, DelimKind.STATEMENT)
+            }
             i++
         }
         return null
     }
 
-    private fun findCloseDelim(text: String, from: Int, openType: Char): CloseDelim? {
-        // Парный закрыватель: `{{` → `}}`, `{%` → `%}`.
-        val first = if (openType == '{') '}' else '%'
+    /**
+     * Находит парный `}}`/`%}` начиная с [from], **пропуская строковые литералы**
+     * Jinja (одинарные и двойные кавычки с учётом `\`-escape). Иначе `}}`/`%}`
+     * внутри строки преждевременно закрыли бы выражение.
+     */
+    private fun findCloseDelim(text: String, from: Int, kind: DelimKind): CloseDelim? {
+        val first = if (kind == DelimKind.INTERP) '}' else '%'
         val n = text.length
         var i = from
         while (i < n - 1) {
-            if (text[i] == first && text[i + 1] == '}') {
+            val c = text[i]
+            if (c == '"' || c == '\'') {
+                // Пропускаем строковый литерал Jinja целиком.
+                i++
+                while (i < n) {
+                    if (text[i] == '\\') { i += 2; continue }
+                    if (text[i] == c) { i++; break }
+                    i++
+                }
+                continue
+            }
+            if (c == first && text[i + 1] == '}') {
                 return CloseDelim(i, i + 2)
             }
             i++

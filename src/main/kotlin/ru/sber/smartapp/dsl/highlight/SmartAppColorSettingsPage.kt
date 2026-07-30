@@ -47,7 +47,7 @@ class SmartAppColorSettingsPage : ColorSettingsPage {
               {
                 "<field>type</field>": "<kw>external</kw>",
                 "<field>action</field>": "say_hello",
-                "value": "<delim>{{</delim> <var>main_form</var><op>.</op><var>name</var> <filter>|</filter> <var>default</var>(<str>""</str>) <delim>}}</delim>"
+                "value": "<delim>{{</delim> <var>main_form</var><op>.</op><var>name</var> <filter>|</filter> <filter>default</filter>(<str>''</str>) <delim>}}</delim>"
               }
             ]
           }

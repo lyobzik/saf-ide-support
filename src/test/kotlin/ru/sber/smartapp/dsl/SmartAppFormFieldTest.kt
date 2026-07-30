@@ -109,6 +109,47 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         assertTrue(literal.references.filterIsInstance<SmartAppFieldReference>().isEmpty())
     }
 
+    // ---- regression: statement-тег с main_form не даёт ссылки/WARNING ---
+
+    fun testStatementTagWithMainFormHasNoReferenceOrWarning() {
+        // {% set x = main_form.unknown %} — statement-тег: семантика полей
+        // допустима только внутри {{ }}. Здесь нет ни ссылки, ни WARNING.
+        val scn = addScenario("s_stmt", """"g": "{% set x = main_form.unknown %}"""")
+        val literal = findLiteral(scn, "g", "{% set x = main_form.unknown %}")
+        assertTrue(
+            "statement-тег не должен давать SmartAppFieldReference",
+            literal.references.filterIsInstance<SmartAppFieldReference>().isEmpty(),
+        )
+        myFixture.openFileInEditor(scn.virtualFile)
+        val warnings = myFixture.doHighlighting(HighlightSeverity.WARNING)
+        assertFalse(
+            "statement-тег не должен давать WARNING о поле",
+            warnings.any { it.description?.contains("Не удаётся разрешить поле") == true },
+        )
+    }
+
+    // ---- regression: закрывающий разделитель внутри Jinja-строки -------
+
+    fun testCloseDelimInsideJinjaStringDoesNotBreak() {
+        // {{ main_form.name | default('}}') }} — }} внутри строки не закрывает
+        // интерполяцию; поле name резолвится корректно.
+        val scn = addScenario("s_str", """"g": "{{ main_form.name | default('}}') }}"""")
+        val ref = fieldReference(scn, "g", "{{ main_form.name | default('}}') }}")
+        assertEquals("поле резолвится несмотря на }} внутри строки", 1, ref.multiResolve(false).size)
+    }
+
+    fun testJsonEscapedDoubleQuotedJinjaString() {
+        // JSON-представление с экранированной двойной кавычкой внутри Jinja.
+        // В файле записано \"y\"; лексер раскрывает escape -> decoded value
+        // содержит обычную двойную кавычку.
+        val scn = myFixture.addFileToProject(
+            "static/references/scenarios/esc.json",
+            """{ "esc": { "type": "form_filling", "form": "hello_form", "g": "{{ main_form.name | default(\"y\") }}" } }""",
+        )
+        val ref = fieldReference(scn, "g", """{{ main_form.name | default("y") }}""")
+        assertEquals(1, ref.multiResolve(false).size)
+    }
+
     // ---- автодополнение -------------------------------------------------
 
     fun testFieldCompletionInsideJinja() {
@@ -125,6 +166,26 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         val items = completeAt(
             "static/references/scenarios/noform.json",
             """{ "noform": { "type": "form_filling", "g": "{{ main_form.<caret> }}" } }""",
+        )
+        assertFalse(items.contains("name"))
+    }
+
+    fun testNoFieldCompletionInsideStatementTag() {
+        // Каретка внутри {% %} — statement-тег, completion полей не активируется
+        // и не падает (regression: ранее выбрасывал исключение).
+        val items = completeAt(
+            "static/references/scenarios/stmt.json",
+            """{ "stmt": { "type": "form_filling", "form": "hello_form", "g": "{% set x = main_form.<caret> %}" } }""",
+        )
+        assertFalse("statement-тег не должен давать completion полей", items.contains("name"))
+    }
+
+    fun testNoFieldCompletionAfterClosedInterpolation() {
+        // Каретка после закрытой интерполяции — вне {{ }}; completion полей
+        // не активируется (regression: ранее активировался по последнему {{).
+        val items = completeAt(
+            "static/references/scenarios/after.json",
+            """{ "after": { "type": "form_filling", "form": "hello_form", "g": "{{ main_form.name }}.<caret>" } }""",
         )
         assertFalse(items.contains("name"))
     }
@@ -170,6 +231,26 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         assertTrue("JINJA_STRING: $attrs", attrs.contains(SmartAppTextAttributes.JINJA_STRING))
     }
 
+    fun testFilterNameRangeHasJinjaFilterAttribute() {
+        // Имя фильтра `default` должно подсвечиваться JINJA_FILTER (как и `|`),
+        // а не JINJA_VAR. Проверяем точный диапазон слова default.
+        val scn = addScenario("s_fn", """"g": "{{ main_form.name | default('x') }}"""")
+        myFixture.openFileInEditor(scn.virtualFile)
+        val infos = myFixture.doHighlighting()
+        val literal = findLiteral(scn, "g", "{{ main_form.name | default('x') }}")
+        // Находим диапазон "default" внутри литерала.
+        val defaultText = "default"
+        val defaultRel = literal.value.indexOf(defaultText)
+        assertTrue("default должен быть в literal", defaultRel >= 0)
+        val defaultAbsStart = literal.textOffset + 1 + defaultRel
+        val defaultAbsEnd = defaultAbsStart + defaultText.length
+        val hasFilter = infos.any {
+            it.forcedTextAttributesKey == SmartAppTextAttributes.JINJA_FILTER &&
+                it.startOffset == defaultAbsStart && it.endOffset == defaultAbsEnd
+        }
+        assertTrue("JINJA_FILTER должен быть на диапазоне 'default'", hasFilter)
+    }
+
     // ---- dumb mode ------------------------------------------------------
 
     fun testDumbModeResolveSilent() {
@@ -208,6 +289,22 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         val scn = addScenario("s11", """"g": "{{ main_form.name }}"""")
         val ref = fieldReference(scn, "g", "{{ main_form.name }}")
         assertEquals(1, ref.multiResolve(false).size)
+    }
+
+    fun testBrokenFormFileDoesNotIndexOwnFields() {
+        // Битой считается форма с полноценной структурой fields.phantom_field,
+        // но с trailing garbage после `}`. Guard JsonPsi.hasError должен отбросить
+        // файл целиком — phantom_field не попадает ни в resolve, ни в completion.
+        myFixture.addFileToProject(
+            "static/references/forms/bad.json",
+            """{ "bad_form": { "type": "form", "fields": { "phantom_field": { "type": "question" } } } } garbage""",
+        )
+        // Completion по форме bad_form не должен предложить phantom_field.
+        val items = completeAt(
+            "static/references/scenarios/badscn.json",
+            """{ "badscn": { "type": "form_filling", "form": "bad_form", "g": "{{ main_form.<caret> }}" } }""",
+        )
+        assertFalse("битый form-файл не должен индексировать свои поля", items.contains("phantom_field"))
     }
 
     // ---- Find Usages поля ----------------------------------------------
