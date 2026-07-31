@@ -35,10 +35,23 @@
 > (не после закрытой `{{ }}.<caret>` и не внутри `{% %}`).
 > - **ColorSettingsPage:** demo переведён на одинарные кавычки (`default('')`),
 > чтобы не ломать JSON-валидность.
-> - Все продуктовые шаги 1–7 выполнены; **99 тестов зелёных** (61 + 13 лексер
-> + 24 полей + 1 F2-расширение), 0 падений.
-> - Все продуктовые шаги 1–7 выполнены; 86 тестов зелёные (61 + 7 лексер + 17 полей
-> + 1 F2-расширение), 0 падений.
+>
+> **Корректирующий цикл 2 (Jinja в массивах + контекст completion):**
+> - **Jinja поддержана в строковых элементах JSON-массивов.** Общий предикат
+> `SmartAppReferenceContributor.isJsonValue` исключает только JSON-ключи;
+> contributor, annotator и completion работают и для элементов массивов
+> (Jinja-ветка аннотатора запускается до проверки свойства).
+> - **Completion определяет контекст каретки тем же лексером**, что подсветка и
+> резолв (а не `lastIndexOf("{{")` по raw): каретка внутри Jinja-строки
+> (`default('{{ main_form.<caret>')`) или statement-тега completion полей не
+> открывает; raw-позиция каретки переводится в decoded через карту смещений.
+> - **`fieldCandidates` пропускает только whitespace-TEXT** между `main_form`,
+> `.` и полем: `{{ main_form + . unknown }}` ссылкой не становится.
+> - **Лексер ограничивает переход через `\`** границей выражения
+> (`minOf(i + 2, until)`): STRING не перекрывает закрывающий разделитель на
+> malformed-входах.
+> - Все продуктовые шаги 1–7 выполнены; **110 тестов зелёных** (62 базовых
+> + 16 лексер + 32 полей), 0 падений.
 
 ## Context
 
@@ -80,7 +93,9 @@
 - **`SmartAppFieldReference` — `PsiPolyVariantReferenceBase`**, диапазон только на
   имя поля (не на весь `main_form.name`) — для корректных Go to Definition,
   Find Usages и будущего rename поля.
-- **Диапазоны по raw-тексту literal**, не по декодированному `value`.
+- **Лексер работает по decoded-тексту** (`JsonStringLiteralDecoder` раскрывает
+  JSON escape и строит карту смещений); диапазоны токенов транслируются обратно
+  в raw через карту `decoded→raw` и далее в absolute (+1 за открывающую кавычку).
 - **Семантическая ссылка только внутри корректно закрытого `{{ … }}`**, вне
   строковых литералов; `{% … %}` — только лексически подсвечивается.
 - **Completion — ранняя Jinja-ветка**, завершающая обработку.
@@ -94,7 +109,7 @@
 src/main/kotlin/ru/sber/smartapp/dsl/
   reference/SmartAppFieldRef.kt           # FormFieldRef + targetFormOf + isFieldDefinition
   reference/SmartAppJinjaLexer.kt         # детерминированный лексер Jinja-фрагментов
-  reference/SmartAppJinjaOffsets.kt       # raw→absolute смещения внутри literal
+  reference/JsonStringLiteralDecoder.kt   # decoded-текст и карта decoded→raw смещений
   reference/SmartAppFieldReference.kt     # поли-вариантная ссылка на имя поля
   index/SmartAppFormFieldIndex.kt         # FileBasedIndexExtension<FormFieldRef, ...Value>
   index/SmartAppFormFieldNameIndex.kt     # FileBasedIndexExtension<String, List<String>>
@@ -225,7 +240,7 @@ Jinja с двойными строками в JSON-представлении
     возвращает все `JsonProperty` полей (дубли → `size == 2`).
 - **Правка `SmartAppReferenceContributor.getReferencesByElement`:** вместо раннего
   `if (isJinja(value)) return EMPTY`:
-  1. Распарсить literal через `SmartAppJinjaLexer` (по **raw-тексту**, см. п.5).
+  1. Распарсить literal через `SmartAppJinjaLexer` (по **decoded-тексту**, см. п.5).
   2. Найти все последовательности `VAR(main_form) DOT VAR(<id>)` **внутри парных
      `{{ … }}`**, вне `STRING`-токенов.
   3. Для каждого: `targetFormOf(literal)` → если не `null`, создать
@@ -234,20 +249,22 @@ Jinja с двойными строками в JSON-представлении
   4. Если ни одной ссылки — вернуть `EMPTY` (поведение как сейчас).
   - `isJinja` остаётся для аннотатора/общего пропуска не-Jinja позиций.
 
-## 5. Диапазоны по raw-тексту literal — `reference/SmartAppJinjaOffsets.kt`
+## 5. Декодирование и трансляция диапазонов — `reference/JsonStringLiteralDecoder.kt`
 
 **Контракт.** `JsonStringLiteral.value` — **декодированный** текст (раскрытые
-escape), тогда как `TextRange`/`HighlightInfo` оперируют **исходным JSON-текстом**
+escape), а `TextRange`/`HighlightInfo` оперируют **исходным JSON-текстом**
 (с кавычками и escape). Поэтому:
-- Лексер работает по **raw-тексту** = `literal.text` минус крайние кавычки
-  (`literal.text` уже содержит кавычки; raw-смещение = позиция внутри `literal.text`
-  после открывающей кавычки).
-- **Безопасное отображение decoded→source НЕ реализуется** (дорого и хрупко);
-  вместо этого лексер оперирует исходными символами JSON-строки как есть (включая
-  `\n`, `\"`).
-- Все `TextRange` из лексера транслируются в absolute-диапазоны через
-  `literal.textOffset + 1 + rawOffset` (+1 за открывающую кавычку). Фиксируется в
-  общем хелпере и используется contributor'ом (ссылки) и аннотатором (подсветка).
+- Raw-текст literal = `literal.text` минус крайние кавычки.
+- `JsonStringLiteralDecoder.decode(raw)` раскрывает JSON escape (`\"`, `\\`,
+  `\n`, `\uXXXX`, …) и возвращает **decoded-текст** + **карту смещений**
+  `decodedToRaw` (длина = decoded.length + 1, последний элемент — sentinel).
+- Лексер работает по **decoded-тексту**: это позволяет корректно разбирать
+  Jinja с двойными строками в JSON-представлении
+  (`"{{ x | default(\"y\") }}"`).
+- Все `TextRange` из лексера (decoded-координаты) транслируются в
+  absolute-диапазоны через `literal.textOffset + 1 + decodedToRaw[offset]`.
+  Трансляцию используют contributor (ссылки), аннотатор (подсветка и WARNING)
+  и completion (перевод raw-позиции каретки в decoded-координаты).
 - Escape-последовательности внутри `STRING`-токена подсвечиваются как часть
   `STRING` (корректно).
 
@@ -255,16 +272,19 @@ escape), тогда как `TextRange`/`HighlightInfo` оперируют **ис
 
 В `addVariants` **первой** проверкой: позиция каретки в конкретном
 `{{ main_form.<caret> }}`.
-- Вычислить raw-смещение каретки = `parameters.offset - literal.textOffset - 1`.
-- Если raw-текст literal содержит парное `{{ … }}`, охватывающее каретку, и
-  непосредственно перед кареткой стоит `main_form.` (по raw-лексеме) — определить
-  форму через `targetFormOf(literal)`; если форма есть, отдать
-  `SmartAppFormFieldNameIndex.allNames(project, form,
+- Вычислить raw-смещение каретки = `parameters.offset - literal.textOffset - 1`
+  и перевести его в decoded-координаты картой `decodedToRaw` (п.5).
+- Если по токенам лексера каретка находится внутри парной `{{ … }}` (не в
+  statement-теге и не в Jinja-строке) и непосредственно перед кареткой стоит
+  `main_form.` — определить форму через `targetFormOf(literal)`; если форма есть,
+  отдать `SmartAppFormFieldNameIndex.allNames(project, form,
   SmartAppScopes.forFile(parameters.originalFile))`. Приоритет 30.0,
   `typeText = "field"`. **Dumb-guard** на чтение индекса.
 - **После Jinja-ветки — `return`** (не падать в существующую ссылочную ветку, иначе
   формы предложатся внутри Jinja).
-- Позиция определяется по **raw literal** (п.5), не по декодированному `value`.
+- Контекст каретки (внутри ли актуальной открытой интерполяции, не в строке и не в
+  statement-теге) определяется **тем же лексером** по decoded-тексту (п.5);
+  raw-позиция каретки переводится в decoded-координаты картой смещений.
 - Scope берётся от `parameters.originalFile` (как уже сделано для обычной completion).
 
 ## 7. Annotator + новые TextAttributes — правка `annotator/SmartAppAnnotator.kt` + `highlight/SmartAppTextAttributes.kt` + `SmartAppColorSettingsPage.kt`
@@ -349,8 +369,8 @@ sandbox-IDE (`./gradlew runIde`) на тестовых данных.
    динамической/отсутствующей `form`; ссылка/WARNING не ставятся.
 3. **Ложные unresolved** — WARNING только для распознанного `main_form.<id>` с
    известной формой, не найденного в индексе; гарантированно невозможно.
-4. **Диапазоны/escape** — работа строго по raw-тексту literal (п.5); escape внутри
-   `STRING`-токена подсвечиваются как `STRING`.
+4. **Диапазоны/escape** — лексер по decoded-тексту с трансляцией диапазонов через
+   карту `decoded→raw` (п.5); escape внутри `STRING`-токена подсвечиваются как `STRING`.
 5. **Dumb mode** — все чтения нового индекса под `DumbService.isDumb` guard.
 6. **Дубли имён полей** — список offset; `multiResolve().size == 2`.
 7. **Перекрытие встроенного JSON-хайлайтера** — новая подсветка применяется только
