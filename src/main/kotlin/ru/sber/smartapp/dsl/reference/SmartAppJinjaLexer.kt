@@ -214,8 +214,9 @@ object SmartAppJinjaLexer {
                 break
             }
             if (t.type == VAR && text.substring(t.range.startOffset, t.range.endOffset) == "main_form") {
-                val dot = nextNonText(tokens, j + 1)
-                val field = if (dot != null && dot.type == DOT) nextNonText(tokens, tokens.indexOf(dot) + 1) else null
+                val dot = nextSkippingWhitespace(text, tokens, j + 1)
+                val field = if (dot != null && dot.type == DOT)
+                    nextSkippingWhitespace(text, tokens, tokens.indexOf(dot) + 1) else null
                 if (field != null && field.type == VAR) {
                     val fieldName = text.substring(field.range.startOffset, field.range.endOffset)
                     result.add(SmartAppFieldCandidate("main_form", fieldName, field.range))
@@ -242,12 +243,23 @@ object SmartAppJinjaLexer {
         return emptyList()
     }
 
-    /** Следующий токен, пропуская TEXT (whitespace). */
-    private fun nextNonText(tokens: List<SmartAppJinjaToken>, fromIdx: Int): SmartAppJinjaToken? {
+    /**
+     * Следующий токен, пропуская только TEXT, состоящий исключительно из
+     * whitespace. Прочий TEXT (например `+` или иной мусор между `main_form` и
+     * `.`) останавливает поиск — чтобы `{{ main_form + . unknown }}` не стал
+     * ложной ссылкой на `unknown`.
+     */
+    private fun nextSkippingWhitespace(
+        text: String,
+        tokens: List<SmartAppJinjaToken>,
+        fromIdx: Int,
+    ): SmartAppJinjaToken? {
         var k = fromIdx
         while (k < tokens.size) {
             val t = tokens[k]
             if (t.type != TEXT) return t
+            val slice = text.substring(t.range.startOffset, t.range.endOffset)
+            if (!slice.all { it.isWhitespace() }) return null
             k++
         }
         return null
