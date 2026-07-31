@@ -21,7 +21,10 @@ import ru.sber.smartapp.dsl.SmartAppScopes
 import ru.sber.smartapp.dsl.SmartAppTypeContext
 import ru.sber.smartapp.dsl.index.SmartAppNameIndex
 import ru.sber.smartapp.dsl.index.SmartAppFormFieldNameIndex
+import ru.sber.smartapp.dsl.reference.JsonStringLiteralDecoder
 import ru.sber.smartapp.dsl.reference.SmartAppFieldRef
+import ru.sber.smartapp.dsl.reference.SmartAppJinjaLexer
+import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType
 import ru.sber.smartapp.dsl.reference.SmartAppRefRules
 import ru.sber.smartapp.dsl.reference.SmartAppReferenceContributor
 
@@ -125,21 +128,18 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         if (rawCaret < 0) return
         val raw = SmartAppReferenceContributor.rawText(literal) ?: return
         if (rawCaret > raw.length) return
-        val prefix = raw.substring(0, rawCaret)
+        val decoded = JsonStringLiteralDecoder.decode(raw)
+        val decodedCaret = decodedCaretOf(decoded.decodedToRaw, rawCaret)
 
-        // Каретка должна быть внутри актуальной интерполяции {{ … }}: ищем
-        // последний разделитель перед кареткой и убеждаемся, что это `{{` (не
-        // `{%`), и что после него до каретки не было закрывающего `}}`. Иначе
-        // completion полей активировался бы и в `"{{ main_form.name }}.<caret>"`,
-        // и внутри `{% … %}`.
-        val lastInterpOpen = prefix.lastIndexOf("{{")
-        val lastStmtOpen = prefix.lastIndexOf("{%")
-        if (lastInterpOpen < 0 || lastInterpOpen < lastStmtOpen) return
-        val afterInterp = prefix.substring(lastInterpOpen + 2)
-        if (afterInterp.contains("}}")) return // интерполяция уже закрыта — каретка вне её
+        // Контекст каретки определяем тем же лексером, что и подсветка/резолв:
+        // completion полей активируется только внутри актуальной открытой
+        // интерполяции {{ … }} — не в statement-теге {% %} и не внутри
+        // Jinja-строки (например default('{{ main_form.<caret>') — это STRING).
+        val interpOpenEnd = interpContextAt(decoded.text, decodedCaret) ?: return
         // Между `{{` и кареткой должен быть ровно `main_form.` (с допуском пробелов).
         // containsMatchIn: completion подставляет dummy после точки, matches требовал
         // бы пустой хвост.
+        val afterInterp = decoded.text.substring(interpOpenEnd, decodedCaret)
         if (!MAIN_FORM_PREFIX.containsMatchIn(afterInterp)) return
 
         val form = SmartAppFieldRef.targetFormOf(literal, fileKind) ?: return
@@ -147,7 +147,7 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         // Prefix перед кареткой — содержимое после последней точки в `main_form.`,
         // иначе платформа отфильтрует варианты по всему `main_form.` и они не
         // совпадут с именами полей.
-        val fieldPrefix = prefix.substringAfterLast('.')
+        val fieldPrefix = decoded.text.substring(0, decodedCaret).substringAfterLast('.')
         val fieldResult = result.withPrefixMatcher(fieldPrefix)
         for (field in SmartAppFormFieldNameIndex.allNames(project, form, scope)) {
             fieldResult.addElement(
@@ -157,6 +157,53 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
                 ),
             )
         }
+    }
+
+    /**
+     * Позиция каретки в decoded-координатах: число decoded-символов, чей
+     * raw-старт строго левее raw-позиции каретки. Без escape совпадает с
+     * raw-позицией; каретка внутри escape-последовательности относится к позиции
+     * сразу после раскрытого символа.
+     */
+    private fun decodedCaretOf(decodedToRaw: IntArray, rawCaret: Int): Int {
+        var decodedCaret = 0
+        // Последний элемент карты — sentinel (конец текста), символом не является.
+        while (decodedCaret < decodedToRaw.size - 1 && decodedToRaw[decodedCaret] < rawCaret) {
+            decodedCaret++
+        }
+        return decodedCaret
+    }
+
+    /**
+     * Смещение конца открывающего `{{`, если позиция [decodedCaret] находится
+     * внутри актуальной открытой интерполяции, иначе `null`. Каретка внутри
+     * statement-тега `{% … %}` или Jinja-строки [SmartAppJinjaTokenType.STRING]
+     * интерполяцией не считается.
+     */
+    private fun interpContextAt(decodedText: String, decodedCaret: Int): Int? {
+        var inInterp = false
+        var inStatement = false
+        var interpOpenEnd = -1
+        for (token in SmartAppJinjaLexer.tokenize(decodedText)) {
+            if (token.range.startOffset >= decodedCaret) break
+            when (token.type) {
+                SmartAppJinjaTokenType.INTERP_OPEN -> {
+                    inInterp = true
+                    inStatement = false
+                    interpOpenEnd = token.range.endOffset
+                }
+                SmartAppJinjaTokenType.INTERP_CLOSE -> inInterp = false
+                SmartAppJinjaTokenType.STATEMENT_OPEN -> {
+                    inStatement = true
+                    inInterp = false
+                }
+                SmartAppJinjaTokenType.STATEMENT_CLOSE -> inStatement = false
+                // Каретка строго внутри строки — это не позиция поля формы.
+                SmartAppJinjaTokenType.STRING -> if (decodedCaret < token.range.endOffset) return null
+                else -> {}
+            }
+        }
+        return if (inInterp && !inStatement) interpOpenEnd else null
     }
 
     private fun addNameVariants(
