@@ -162,7 +162,13 @@ object SmartAppJinjaLexer {
                     i++
                     while (i < until) {
                         val q = text[i]
-                        if (q == '\\') { i += 2; continue }
+                        if (q == '\\') {
+                            // Ограничиваем переход, чтобы `\` у самой границы
+                            // выражения не увёл i за until и не перекрыл
+                            // закрывающий разделитель.
+                            i = minOf(i + 2, until)
+                            continue
+                        }
                         if (q == c) { i++; break }
                         i++
                     }
