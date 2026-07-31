@@ -2,6 +2,7 @@
 build/
 .tooling/
 .intellijPlatform/
+.kotlin/
 *.iml
 .idea/
 out/
