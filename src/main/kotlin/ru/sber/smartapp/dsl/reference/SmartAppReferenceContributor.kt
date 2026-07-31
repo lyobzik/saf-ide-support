@@ -11,7 +11,6 @@ import com.intellij.psi.PsiReferenceRegistrar
 import com.intellij.util.ProcessingContext
 import ru.sber.smartapp.dsl.SmartAppFiles
 import ru.sber.smartapp.dsl.reference.JsonStringLiteralDecoder.rawText
-import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.INTERP_OPEN
 
 /**
  * Навешивает ссылки на строковые JSON-литералы в ссылочной позиции SmartApp:
@@ -37,11 +36,9 @@ class SmartAppReferenceContributor : PsiReferenceContributor() {
                 ): Array<PsiReference> {
                     val literal = element as? JsonStringLiteral ?: return PsiReference.EMPTY_ARRAY
                     if (SmartAppFiles.kindOf(literal.containingFile) == null) return PsiReference.EMPTY_ARRAY
-
-                    // Только значения свойств, не ключи.
-                    val property = literal.parent
-                    if (property != null && property !is com.intellij.json.psi.JsonProperty) return PsiReference.EMPTY_ARRAY
-                    if (property is com.intellij.json.psi.JsonProperty && property.value !== literal) return PsiReference.EMPTY_ARRAY
+                    // Только значения JSON (property value или элемент массива),
+                    // не ключи свойств.
+                    if (!isJsonValue(literal)) return PsiReference.EMPTY_ARRAY
 
                     // Сначала — обычная ссылочная позиция (без Jinja).
                     if (!isJinja(literal.value)) {
@@ -81,6 +78,22 @@ class SmartAppReferenceContributor : PsiReferenceContributor() {
 
     companion object {
         fun isJinja(text: String): Boolean = text.contains("{{") || text.contains("{%")
+
+        /**
+         * `true`, если [literal] — значение JSON (значение свойства или элемент
+         * массива), а не ключ свойства. Семантика полей и обычные ссылки
+         * применяются только к значениям: ключ `"{{ main_form.name }}"` не должен
+         * получать ссылку.
+         */
+        internal fun isJsonValue(literal: JsonStringLiteral): Boolean {
+            val parent = literal.parent ?: return true
+            // Если literal — ключ свойства (nameElement), это не значение.
+            if (parent is com.intellij.json.psi.JsonProperty) {
+                return parent.nameElement !== literal
+            }
+            // Элемент массива и прочие позиции — значения.
+            return true
+        }
 
         /**
          * Raw-содержимое литерала (без крайних JSON-кавычек). Делегирует в

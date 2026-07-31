@@ -61,18 +61,20 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         val fileKind = SmartAppFiles.kindOf(parameters.originalFile) ?: return
 
         val literal = parameters.position.parent as? JsonStringLiteral ?: return
-        val property = literal.parent as? JsonProperty ?: return
-        if (property.value !== literal) return
+        // Только значения JSON (property value или элемент массива), не ключи.
+        if (!SmartAppReferenceContributor.isJsonValue(literal)) return
+        val property = literal.parent as? JsonProperty
 
         // Ранняя Jinja-ветка: каретка внутри `{{ main_form.<caret> }}`. Должна
         // идти первой и завершать обработку, иначе обычная ссылочная ветка ниже
-        // предложит формы в позиции, где ожидается имя поля.
+        // предложит формы в позиции, где ожидается имя поля. Jinja может стоять
+        // и в элементе массива, поэтому ветка не требует JsonProperty.
         if (SmartAppReferenceContributor.isJinja(literal.value)) {
             addFieldVariants(literal, fileKind, parameters.originalFile, parameters, result)
             return
         }
 
-        if (property.name == "type") {
+        if (property != null && property.value === literal && property.name == "type") {
             addKeywordVariants(property, fileKind, result)
             return
         }

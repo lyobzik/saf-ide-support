@@ -58,21 +58,25 @@ class SmartAppAnnotator : Annotator, DumbAware {
         fileKind: SmartAppRefKind,
         holder: AnnotationHolder,
     ) {
-        val property = literal.parent as? JsonProperty ?: return
-        if (property.value !== literal) return
+        // Только значения JSON (property value или элемент массива), не ключи.
+        if (!SmartAppReferenceContributor.isJsonValue(literal)) return
+        val property = literal.parent as? JsonProperty
+
+        // Подсветка Jinja-разметки и (для известной формы) неразрешённых полей.
+        // Запускается до проверки свойства: Jinja может стоять и в элементе массива.
+        if (SmartAppReferenceContributor.isJinja(literal.value)) {
+            annotateJinja(literal, holder)
+            return
+        }
 
         // Подсветка ключевого слова в значении type (чисто PSI, безопасно в dumb mode).
-        if (property.name == "type" && isKeywordInContext(property, fileKind, literal.value)) {
+        if (property != null && property.name == "type" && property.value === literal &&
+            isKeywordInContext(property, fileKind, literal.value)
+        ) {
             holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
                 .range(literal.textRange)
                 .textAttributes(SmartAppTextAttributes.KEYWORD)
                 .create()
-            return
-        }
-
-        // Подсветка Jinja-разметки и (для известной формы) неразрешённых полей.
-        if (SmartAppReferenceContributor.isJinja(literal.value)) {
-            annotateJinja(literal, holder)
             return
         }
 
