@@ -146,4 +146,49 @@ class SmartAppJinjaLexerTest {
         assertEquals(1, candidates.size)
         assertEquals("name", candidates[0].field)
     }
+
+    // ---- regression: мусор между main_form и точкой ----------------------
+
+    @Test
+    fun garbageBetweenFormAndDotYieldsNoCandidate() {
+        // {{ main_form + . unknown }} — не-whitespace TEXT между main_form и
+        // точкой разрывает последовательность: ссылки на unknown не создаётся.
+        val candidates = SmartAppJinjaLexer.fieldCandidates("{{ main_form + . unknown }}")
+        assertTrue(candidates.isEmpty())
+    }
+
+    // ---- regression: '\' перед закрывающим разделителем ------------------
+
+    @Test
+    fun unterminatedStringWithEscapeBeforeCloseDelimIsText() {
+        // {{ 'a\}} — '\' перед }}: разделитель не находится, весь фрагмент
+        // остаётся одним TEXT, STRING не перекрывает закрывающий разделитель.
+        val tokens = SmartAppJinjaLexer.tokenize("{{ 'a\\}}")
+        assertEquals(listOf(TEXT), tokens.map { it.type })
+    }
+
+    @Test
+    fun tokenRangesAreOrderedAndWithinBoundsOnMalformedInput() {
+        // Малформированные входы не должны давать пересекающихся диапазонов
+        // или диапазонов за границами текста (риск для highlight).
+        val inputs = listOf(
+            "{{ 'a\\}}",
+            "{{ \"x\\",
+            "{{ '",
+            "{{ main_form.",
+            "{% if",
+            "{{ '\\'%}",
+            "{{ 'a\\' }}",
+            "text {{ x }} {{ 'y\\' }} z",
+        )
+        for (input in inputs) {
+            val tokens = SmartAppJinjaLexer.tokenize(input)
+            var prevEnd = 0
+            for (t in tokens) {
+                assertTrue("start >= prevEnd для '$input': $t", t.range.startOffset >= prevEnd)
+                assertTrue("end <= length для '$input': $t", t.range.endOffset <= input.length)
+                prevEnd = t.range.endOffset
+            }
+        }
+    }
 }

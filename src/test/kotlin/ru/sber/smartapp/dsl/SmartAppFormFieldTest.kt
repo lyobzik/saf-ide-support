@@ -1,8 +1,10 @@
 package ru.sber.smartapp.dsl
 
+import com.intellij.json.psi.JsonArray
 import com.intellij.json.psi.JsonProperty
 import com.intellij.json.psi.JsonStringLiteral
 import com.intellij.lang.annotation.HighlightSeverity
+import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.psi.PsiFile
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.DumbModeTestUtils
@@ -150,6 +152,63 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         assertEquals(1, ref.multiResolve(false).size)
     }
 
+    // ---- regression: Jinja в JSON-ключах и элементах массива ------------
+
+    fun testJinjaKeyGetsNoFieldReference() {
+        // JSON-ключ "{{ main_form.name }}" — не значение: ссылки на поле нет.
+        myFixture.addFileToProject(
+            "static/references/scenarios/jkey.json",
+            """{ "jkey": { "type": "form_filling", "form": "hello_form", "{{ main_form.name }}": "x" } }""",
+        )
+        val file = findFile("static/references/scenarios/jkey.json")
+        val keyLiteral = PsiTreeUtil.findChildrenOfType(file, JsonProperty::class.java)
+            .first { it.name == "{{ main_form.name }}" }.nameElement as JsonStringLiteral
+        assertTrue(
+            "JSON-ключ не должен получать SmartAppFieldReference",
+            keyLiteral.references.filterIsInstance<SmartAppFieldReference>().isEmpty(),
+        )
+    }
+
+    fun testResolvesFieldInArrayValue() {
+        val scn = myFixture.addFileToProject(
+            "static/references/scenarios/arrres.json",
+            """{ "arrres": { "type": "form_filling", "form": "hello_form", "messages": ["{{ main_form.name }}"] } }""",
+        )
+        val literal = findArrayLiteral(scn, "{{ main_form.name }}")
+        val ref = literal.references.filterIsInstance<SmartAppFieldReference>().firstOrNull()
+            ?: error("no SmartAppFieldReference on array element")
+        assertEquals("поле в элементе массива резолвится", 1, ref.multiResolve(false).size)
+    }
+
+    fun testUnresolvedFieldInArrayValueIsWarning() {
+        val scn = myFixture.addFileToProject(
+            "static/references/scenarios/arrwarn.json",
+            """{ "arrwarn": { "type": "form_filling", "form": "hello_form", "messages": ["{{ main_form.unknown }}"] } }""",
+        )
+        myFixture.openFileInEditor(scn.virtualFile)
+        val warnings = myFixture.doHighlighting(HighlightSeverity.WARNING)
+        assertTrue(
+            "ожидался WARNING о поле в элементе массива",
+            warnings.any { it.description?.contains("Не удаётся разрешить поле") == true },
+        )
+    }
+
+    fun testJinjaAttributesInArrayValue() {
+        // Подсветка Jinja в элементе массива — с точным диапазоном VAR(name).
+        val scn = myFixture.addFileToProject(
+            "static/references/scenarios/arrhl.json",
+            """{ "arrhl": { "type": "form_filling", "form": "hello_form", "messages": ["{{ main_form.name }}"] } }""",
+        )
+        myFixture.openFileInEditor(scn.virtualFile)
+        val infos = myFixture.doHighlighting()
+        val nameStart = scn.text.indexOf("name", scn.text.indexOf("messages"))
+        val hasVar = infos.any {
+            it.forcedTextAttributesKey == SmartAppTextAttributes.JINJA_VAR &&
+                it.startOffset == nameStart && it.endOffset == nameStart + "name".length
+        }
+        assertTrue("JINJA_VAR на 'name' в элементе массива", hasVar)
+    }
+
     // ---- автодополнение -------------------------------------------------
 
     fun testFieldCompletionInsideJinja() {
@@ -188,6 +247,27 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
             """{ "after": { "type": "form_filling", "form": "hello_form", "g": "{{ main_form.name }}.<caret>" } }""",
         )
         assertFalse(items.contains("name"))
+    }
+
+    fun testFieldCompletionInArrayValue() {
+        // Jinja в элементе массива: completion полей работает и без JsonProperty.
+        val items = completeAt(
+            "static/references/scenarios/arrcomp.json",
+            """{ "arrcomp": { "type": "form_filling", "form": "hello_form", "messages": ["{{ main_form.<caret> }}"] } }""",
+        )
+        assertTrue("completion полей в элементе массива: $items", items.contains("name"))
+        assertTrue(items.contains("age"))
+    }
+
+    fun testNoFieldCompletionInsideFilterStringArgument() {
+        // Каретка внутри строкового аргумента фильтра: текст '{{ main_form.' —
+        // содержимое Jinja-строки (STRING-токен), completion полей не активируется.
+        val items = completeAt(
+            "static/references/scenarios/fstr.json",
+            """{ "fstr": { "type": "form_filling", "form": "hello_form", "g": "{{ main_form.name | default('{{ main_form.<caret>') }}" } }""",
+        )
+        assertFalse("внутри Jinja-строки нет completion полей", items.contains("name"))
+        assertFalse(items.contains("age"))
     }
 
     // ---- unresolved WARNING --------------------------------------------
@@ -251,6 +331,48 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         assertTrue("JINJA_FILTER должен быть на диапазоне 'default'", hasFilter)
     }
 
+    fun testJinjaTokenRangesArePrecise() {
+        // Точные raw-диапазоны атрибутов DELIM/VAR/DOT/STRING на демо-строке,
+        // а не просто наличие атрибута где-либо в файле.
+        val scn = addScenario("s_rng", """"g": "{{ main_form.name | default('x') }}"""")
+        myFixture.openFileInEditor(scn.virtualFile)
+        val infos = myFixture.doHighlighting()
+        val fileText = scn.text
+
+        fun hasRange(attr: TextAttributesKey, start: Int, end: Int) = infos.any {
+            it.forcedTextAttributesKey == attr && it.startOffset == start && it.endOffset == end
+        }
+
+        val interpOpen = fileText.indexOf("{{")
+        assertTrue("DELIM '{{'", hasRange(SmartAppTextAttributes.JINJA_DELIM, interpOpen, interpOpen + 2))
+        val interpClose = fileText.indexOf("}}")
+        assertTrue("DELIM '}}'", hasRange(SmartAppTextAttributes.JINJA_DELIM, interpClose, interpClose + 2))
+        val mainForm = fileText.indexOf("main_form")
+        assertTrue("VAR 'main_form'", hasRange(SmartAppTextAttributes.JINJA_VAR, mainForm, mainForm + "main_form".length))
+        val dot = fileText.indexOf('.', mainForm)
+        assertTrue("DOT", hasRange(SmartAppTextAttributes.JINJA_OP, dot, dot + 1))
+        val string = fileText.indexOf("'x'")
+        assertTrue("STRING 'x'", hasRange(SmartAppTextAttributes.JINJA_STRING, string, string + 3))
+    }
+
+    fun testJsonEscapedDoubleQuotedJinjaStringHighlighting() {
+        // Raw-файл содержит \"y\"; STRING-атрибут покрывает raw-диапазон \"y\"
+        // целиком (decoded-диапазон строки транслирован через decodedToRaw).
+        val scn = myFixture.addFileToProject(
+            "static/references/scenarios/eschl.json",
+            """{ "eschl": { "type": "form_filling", "form": "hello_form", "g": "{{ main_form.name | default(\"y\") }}" } }""",
+        )
+        myFixture.openFileInEditor(scn.virtualFile)
+        val infos = myFixture.doHighlighting()
+        val stringStart = scn.text.indexOf("\\\"y\\\"")
+        assertTrue("raw-файл содержит \\\"y\\\"", stringStart >= 0)
+        val hasString = infos.any {
+            it.forcedTextAttributesKey == SmartAppTextAttributes.JINJA_STRING &&
+                it.startOffset == stringStart && it.endOffset == stringStart + "\\\"y\\\"".length
+        }
+        assertTrue("JINJA_STRING покрывает raw-диапазон \\\"y\\\"", hasString)
+    }
+
     // ---- dumb mode ------------------------------------------------------
 
     fun testDumbModeResolveSilent() {
@@ -305,6 +427,13 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
             """{ "badscn": { "type": "form_filling", "form": "bad_form", "g": "{{ main_form.<caret> }}" } }""",
         )
         assertFalse("битый form-файл не должен индексировать свои поля", items.contains("phantom_field"))
+        // И resolve: ссылка на phantom_field создаётся, но ничего не находит.
+        val scn = myFixture.addFileToProject(
+            "static/references/scenarios/badscn2.json",
+            """{ "badscn2": { "type": "form_filling", "form": "bad_form", "g": "{{ main_form.phantom_field }}" } }""",
+        )
+        val ref = fieldReference(scn, "g", "{{ main_form.phantom_field }}")
+        assertEquals("битый form-файл не даёт resolve своих полей", 0, ref.multiResolve(false).size)
     }
 
     // ---- Find Usages поля ----------------------------------------------
@@ -357,6 +486,11 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
             ?: error("no property '$propName' with value '$value' in ${file.name}")
         return match.value as JsonStringLiteral
     }
+
+    private fun findArrayLiteral(file: PsiFile, value: String): JsonStringLiteral =
+        PsiTreeUtil.findChildrenOfType(file, JsonStringLiteral::class.java)
+            .firstOrNull { it.value == value && it.parent is JsonArray }
+            ?: error("no array literal '$value' in ${file.name}")
 
     private fun findFieldProperty(path: String, fieldName: String): JsonProperty {
         val file = findFile(path)
