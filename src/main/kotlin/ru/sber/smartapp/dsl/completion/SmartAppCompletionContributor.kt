@@ -140,11 +140,13 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         val interpOpenEnd = interpContextAt(decoded.text, decodedCaret)
             ?: interpContextAt(decoded.text + "}}", decodedCaret)
             ?: return
-        // Между `{{` и кареткой должен быть ровно `main_form.` (с допуском пробелов).
-        // containsMatchIn: completion подставляет dummy после точки, matches требовал
-        // бы пустой хвост.
+        // Между `{{` и кареткой должен быть ровно `main_form.` (с допуском
+        // пробелов) и далее — только частичный идентификатор поля: цепочки
+        // `main_form.x.<caret>` резолва не имеют (см. границы fieldCandidates),
+        // и completion там предлагал бы заведомо битые варианты. Полный матч
+        // (matches), а не containsMatchIn: хвост до каретки валидируется целиком.
         val afterInterp = decoded.text.substring(interpOpenEnd, decodedCaret)
-        if (!MAIN_FORM_PREFIX.containsMatchIn(afterInterp)) return
+        if (!MAIN_FORM_CONTEXT.matches(afterInterp)) return
 
         val form = SmartAppFieldRef.targetFormOf(literal, fileKind) ?: return
         val scope = SmartAppScopes.forPsiFile(originalFile)
@@ -255,10 +257,13 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         const val NAME_PRIORITY = 50.0
         const val FIELD_PRIORITY = 30.0
 
-        // Префикс между `{{` и кареткой, открывающий completion имени поля:
-        // опциональные пробелы, `main_form`, опциональные пробелы, точка. Используем
-        // containsMatchIn, а не matches: completion подставляет dummy-идентификатор
-        // на место каретки, поэтому после точки ещё есть текст.
-        val MAIN_FORM_PREFIX: Regex = Regex("""^\s*main_form\s*\.\s*""")
+        // Полный контекст между `{{` и кареткой, открывающий completion имени
+        // поля: опциональные пробелы, `main_form`, опциональные пробелы, точка,
+        // опциональный частичный идентификатор (первый символ — identifierStart,
+        // как у VAR лексера). Полный матч: хвост вроде `x.` (цепочка) или
+        // `2` (не-идентификатор) completion не открывает.
+        val MAIN_FORM_CONTEXT: Regex = Regex(
+            """^\s*main_form\s*\.\s*(?:\p{javaJavaIdentifierStart}\p{javaJavaIdentifierPart}*)?$""",
+        )
     }
 }
