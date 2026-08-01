@@ -27,7 +27,7 @@ object SmartAppTextAttributes {
         DefaultLanguageHighlighterColors.BRACES,
     )
 
-    /** Переменная/идентификатор внутри Jinja (`main_form`, имя поля, имя фильтра). */
+    /** Переменная/идентификатор внутри Jinja (`main_form`, имя поля). */
     val JINJA_VAR: TextAttributesKey = TextAttributesKey.createTextAttributesKey(
         "SMARTAPP_JINJA_VAR",
         DefaultLanguageHighlighterColors.IDENTIFIER,
@@ -39,7 +39,7 @@ object SmartAppTextAttributes {
         DefaultLanguageHighlighterColors.DOT,
     )
 
-    /** Оператор фильтра `|` внутри Jinja. */
+    /** Оператор фильтра `|` и имя фильтра внутри Jinja. */
     val JINJA_FILTER: TextAttributesKey = TextAttributesKey.createTextAttributesKey(
         "SMARTAPP_JINJA_FILTER",
         DefaultLanguageHighlighterColors.OPERATION_SIGN,
