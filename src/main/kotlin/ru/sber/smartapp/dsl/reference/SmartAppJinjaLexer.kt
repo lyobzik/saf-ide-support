@@ -185,6 +185,8 @@ object SmartAppJinjaLexer {
                     afterFilter = false
                 }
                 else -> {
+                    // Символ не матчит ни одну ветку выше — while гарантированно
+                    // сделает хотя бы одну итерацию, пустого диапазона не будет.
                     val start = i
                     while (i < until && !text[i].isWhitespace() &&
                         text[i] != '.' && text[i] != '|' &&
@@ -193,7 +195,6 @@ object SmartAppJinjaLexer {
                     ) {
                         i++
                     }
-                    if (i == start) i++
                     out.add(token(TEXT, start, i))
                     afterFilter = false
                 }
