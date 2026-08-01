@@ -157,6 +157,32 @@ class SmartAppJinjaLexerTest {
         assertTrue(candidates.isEmpty())
     }
 
+    // ---- regression: цепочки вне scope `main_form.<field>` ---------------
+
+    @Test
+    fun mainFormAsNestedFieldYieldsNoCandidate() {
+        // {{ variables.main_form.unknown }} — main_form в позиции чужого поля:
+        // scope ограничен плоским main_form.<field>, кандидата нет.
+        val candidates = SmartAppJinjaLexer.fieldCandidates("{{ variables.main_form.unknown }}")
+        assertTrue(candidates.isEmpty())
+    }
+
+    @Test
+    fun subobjectChainYieldsNoCandidate() {
+        // {{ main_form.name.extra }} — подобъекты main_form.x.y не разбираются:
+        // ни ссылки на name, ни WARNING.
+        val candidates = SmartAppJinjaLexer.fieldCandidates("{{ main_form.name.extra }}")
+        assertTrue(candidates.isEmpty())
+    }
+
+    @Test
+    fun operandPositionStillYieldsCandidate() {
+        // {{ x + main_form.name }} — main_form в позиции операнда: кандидат есть.
+        val candidates = SmartAppJinjaLexer.fieldCandidates("{{ x + main_form.name }}")
+        assertEquals(1, candidates.size)
+        assertEquals("name", candidates[0].field)
+    }
+
     // ---- regression: '\' перед закрывающим разделителем ------------------
 
     @Test

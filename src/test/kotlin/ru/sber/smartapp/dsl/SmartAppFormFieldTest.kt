@@ -111,6 +111,34 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         assertTrue(literal.references.filterIsInstance<SmartAppFieldReference>().isEmpty())
     }
 
+    fun testNoReferenceOrWarningForVariablesMainFormChain() {
+        // `{{ variables.main_form.unknown }}` — main_form в позиции чужого поля:
+        // вне scope main_form.<field>, ни ссылки, ни WARNING.
+        val scn = addScenario("s_chain", """"g": "{{ variables.main_form.unknown }}"""")
+        val literal = findLiteral(scn, "g", "{{ variables.main_form.unknown }}")
+        assertTrue(
+            "цепочка variables.main_form не даёт SmartAppFieldReference",
+            literal.references.filterIsInstance<SmartAppFieldReference>().isEmpty(),
+        )
+        myFixture.openFileInEditor(scn.virtualFile)
+        val warnings = myFixture.doHighlighting(HighlightSeverity.WARNING)
+        assertFalse(
+            "цепочка variables.main_form не даёт WARNING о поле",
+            warnings.any { it.description?.contains("Не удаётся разрешить поле") == true },
+        )
+    }
+
+    fun testNoReferenceForSubobjectChain() {
+        // `{{ main_form.name.extra }}` — подобъекты main_form.x.y не разбираются:
+        // ссылки на name не создаётся.
+        val scn = addScenario("s_sub", """"g": "{{ main_form.name.extra }}"""")
+        val literal = findLiteral(scn, "g", "{{ main_form.name.extra }}")
+        assertTrue(
+            "подобъект main_form.x.y не даёт SmartAppFieldReference",
+            literal.references.filterIsInstance<SmartAppFieldReference>().isEmpty(),
+        )
+    }
+
     // ---- regression: statement-тег с main_form не даёт ссылки/WARNING ---
 
     fun testStatementTagWithMainFormHasNoReferenceOrWarning() {
@@ -279,6 +307,32 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         )
         assertTrue("completion полей в незакрытой интерполяции: $items", items.contains("name"))
         assertTrue(items.contains("age"))
+    }
+
+    fun testFieldCompletionAfterSpaceAfterDot() {
+        // {{ main_form. <caret> }} — пробел после точки допустим регексом;
+        // prefix нормализуется, поля предлагаются.
+        val items = completeAt(
+            "static/references/scenarios/spaced.json",
+            """{ "spaced": { "type": "form_filling", "form": "hello_form", "g": "{{ main_form. <caret> }}" } }""",
+        )
+        assertTrue("completion полей после пробела за точкой: $items", items.contains("name"))
+        assertTrue(items.contains("age"))
+    }
+
+    fun testCompletionSkipsNonIdentifierFieldNames() {
+        // Поле с пунктуацией в имени (contact.email) лексер резолвить не способен —
+        // completion его не предлагает; обычные поля предлагаются.
+        myFixture.addFileToProject(
+            "static/references/forms/punct.json",
+            """{ "punct_form": { "type": "form", "fields": { "contact.email": { "type": "question" }, "ok": { "type": "question" } } } }""",
+        )
+        val items = completeAt(
+            "static/references/scenarios/punct.json",
+            """{ "punct": { "type": "form_filling", "form": "punct_form", "g": "{{ main_form.<caret> }}" } }""",
+        )
+        assertTrue("identifier-поле предлагается: $items", items.contains("ok"))
+        assertFalse("не-identifier поле отфильтровано: $items", items.contains("contact.email"))
     }
 
     // ---- unresolved WARNING --------------------------------------------
