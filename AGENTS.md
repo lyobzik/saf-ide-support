@@ -16,7 +16,9 @@
 - переход к определению сущности (Go to Definition / Ctrl+Click);
 - поиск использований (Find Usages / Alt+F7);
 - автодополнение значений `type` и ссылочных ключей;
-- подсветка неразрешённых ссылок (severity **WARNING**).
+- подсветка неразрешённых ссылок (severity **WARNING**);
+- навигация, автодополнение и подсветка полей форм в Jinja-интерполяциях
+  `{{ main_form.<field> }}` (scope — только плоский доступ к полю).
 
 ## Ключевые компоненты
 
@@ -27,19 +29,25 @@
 | `SmartAppRefKind` | Перечисление видов сущностей (SCENARIO, FORM, ACTION, BEHAVIOR, FILLER, CLASSIFIER) и их каталогов |
 | `SmartAppFiles` | Определяет, является ли JSON-файл DSL-файлом, и его `RefKind` по пути `static/references/<kind>/` |
 | `SmartAppKeywords` | Ленивая загрузка `keywords.json`; запросы `isKeyword(category, value)` / `all(category)` |
-| `highlight/SmartAppTextAttributes` | Ключи цветовых атрибутов (`SMARTAPP_KEYWORD`, `SMARTAPP_FIELD`) |
+| `highlight/SmartAppTextAttributes` | Ключи цветовых атрибутов (`SMARTAPP_KEYWORD`, `SMARTAPP_FIELD`, `SMARTAPP_JINJA_*`) |
 | `highlight/SmartAppColorSettingsPage` | Страница «SmartApp DSL» в Settings → Color Scheme |
-| `annotator/SmartAppAnnotator` | `DumbAware`-аннотатор: подсветка по PSI + WARNING на битых ссылках (ветка с индексом под dumb-guard) |
+| `annotator/SmartAppAnnotator` | `DumbAware`-аннотатор: подсветка по PSI (включая токены Jinja) + WARNING на битых ссылках и неразрешённых полях форм (ветки с индексом под dumb-guard) |
 | `SmartAppTypeContext` | Категория ключевых слов `type` по PSI-контексту (общая для completion и подсветки); `fields`→`field_description`, action-контейнеры→`action`, `requirement` внутри `fields`→`field_requirement` |
 | `SmartAppScopes` | Область поиска для резолва/completion — каталог `references` исходного файла (изоляция наборов `static/references`) |
 | `index/SmartAppDefinitionIndex` | `FileBasedIndexExtension` с составным ключом `"<KIND>:<name>"`, value = список offset'ов (сохраняет дубликаты ключей через PSI `getPropertyList()`) |
 | `index/SmartAppNameIndex` | `FileBasedIndexExtension` с ключом = вид сущности, value = имена определений файла; для автодополнения имён без `getAllKeys`-скана |
+| `index/SmartAppFormFieldIndex` | `FileBasedIndexExtension<FormFieldRef, …Value>` — поля форм `forms.<form>.fields.<field>` (дубли полей сохраняются) |
+| `index/SmartAppFormFieldNameIndex` | Ключ = имя формы, value = имена её полей; для completion полей в Jinja |
 | `index/SmartAppDefinitionValue` + `…Externalizer` | Значение индекса определений и его var-int сериализация (версия в `getVersion()`) |
 | `reference/SmartAppRefRules` | Замороженная таблица правил «условие на узел → target kind(s)» |
 | `reference/SmartAppReference` | `PsiPolyVariantReferenceBase`, резолв через индекс (под dumb-guard) |
-| `reference/SmartAppReferenceContributor` | Навешивает ссылки на `JsonStringLiteral`; Jinja-guard (`{{`, `{%`) |
-| `completion/SmartAppCompletionContributor` | `DumbAware`-автодополнение ключевых слов и имён сущностей |
-| `findusages/SmartAppFindUsagesProvider` + `…ElementDescriptionProvider` | Find Usages для определений и человекочитаемые подписи |
+| `reference/SmartAppReferenceContributor` | Навешивает ссылки на `JsonStringLiteral` (только значения JSON, не ключи): кросс-ссылки и ссылки на поля форм в `{{ main_form.<field> }}` |
+| `reference/SmartAppJinjaLexer` | Детерминированный лексер Jinja-фрагментов внутри строкового литерала (по decoded-тексту); `fieldCandidates` — только плоский `main_form.<field>` внутри `{{ }}` (цепочки не разбираются) |
+| `reference/JsonStringLiteralDecoder` | decoded-текст литерала (раскрытые JSON escape) + карта `decoded→raw` смещений для трансляции диапазонов |
+| `reference/SmartAppFieldRef` + `FormFieldRefDescriptor` | `FormFieldRef(form, field)` — типизированный ключ поля (FIELD не расширяет `SmartAppRefKind`); `targetFormOf` / `isFieldDefinition` |
+| `reference/SmartAppFieldReference` | Поли-вариантная ссылка на поле формы; диапазон только на имя поля |
+| `completion/SmartAppCompletionContributor` | `DumbAware`-автодополнение ключевых слов, имён сущностей и полей формы в `{{ main_form.<caret> }}` (только identifier-имена) |
+| `findusages/SmartAppFindUsagesProvider` + `…ElementDescriptionProvider` | Find Usages для определений и полей форм (подпись `<form>.<field>`), человекочитаемые подписи |
 
 Ресурсы: `src/main/resources/META-INF/plugin.xml`,
 `src/main/resources/keywords/keywords.json` (генерируется).
@@ -135,8 +143,19 @@ docs/plans/, docs/insights/, arch/, mds/                    # материалы
 - **Дубликаты top-level ключей:** индексатор обходит `JsonObject.getPropertyList()`
   (сохраняет дубли); `findProperty()` их схлопывает — навигация строится по
   сохранённым offset'ам (`multiResolve` отдаёт все).
-- **Jinja-guard:** значения с `{{` или `{%` не считаются ссылками (не резолвятся
-  и не подсвечиваются как ошибка).
+- **Jinja-значения:** прямые ссылки на сущности из значений с `{{`/`{%` не
+  создаются (динамические шаблоны — не «битая ссылка»), но внутри интерполяций
+  `{{ … }}` работает семантика полей форм: `{{ main_form.<field> }}` резолвится,
+  дополняется и подсвечивается (WARNING при известной форме). Scope — только
+  плоский `main_form.<field>`: цепочки (`variables.main_form.x`, `main_form.x.y`)
+  и statement-теги `{% … %}` семантики не получают.
+- **Jinja-лексер по decoded-тексту** (`JsonStringLiteralDecoder`): JSON escape
+  раскрываются до лексинга, диапазоны токенов транслируются в документ картой
+  `decoded→raw`. Completion определяет контекст каретки тем же лексером и
+  предлагает только identifier-имена полей.
+- **FIELD — не `SmartAppRefKind`:** поля форм живут внутри top-level определения
+  формы (`forms.<form>.fields.<field>`) и моделируются `FormFieldRef`;
+  контракты видов (`kindOf`, `isTopLevelDefinition`) к ним не применимы.
 - **Frozen rule table** (`SmartAppRefRules`) — единый источник правды для ссылок,
   unresolved-аннотаций и автодополнения имён.
 - **Контекст категории `type`** (`SmartAppTypeContext`) — единый источник правды
@@ -148,9 +167,10 @@ docs/plans/, docs/insights/, arch/, mds/                    # материалы
   чужой `static/references`.
 - **Версионирование индексов:** при изменении формата сериализации увеличивать
   `getVersion()` соответствующего индекса —
-  `SmartAppDefinitionExternalizer.SERIALIZATION_VERSION` для индекса определений
-  и `SmartAppNameIndex.getVersion()` для индекса имён (у каждого индекса свой
-  externalizer и версия).
+  `SmartAppDefinitionExternalizer.SERIALIZATION_VERSION` для индексов определений
+  и полей (`SmartAppDefinitionIndex`, `SmartAppFormFieldIndex`) и своя
+  `CONTENT_VERSION` у индексов имён (`SmartAppNameIndex`,
+  `SmartAppFormFieldNameIndex`) — у каждого индекса свой externalizer и версия.
 
 ### Использование SDK / платформы
 
