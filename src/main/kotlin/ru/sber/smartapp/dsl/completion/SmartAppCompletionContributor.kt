@@ -150,8 +150,9 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         val scope = SmartAppScopes.forPsiFile(originalFile)
         // Prefix перед кареткой — содержимое после последней точки в `main_form.`,
         // иначе платформа отфильтрует варианты по всему `main_form.` и они не
-        // совпадут с именами полей.
+        // совпадут с именами полей. Пробел после точки в идентификатор не входит.
         val fieldPrefix = decoded.text.substring(0, decodedCaret).substringAfterLast('.')
+            .dropWhile { it.isWhitespace() }
         val fieldResult = result.withPrefixMatcher(fieldPrefix)
         for (field in SmartAppFormFieldNameIndex.allNames(project, form, scope)) {
             fieldResult.addElement(
