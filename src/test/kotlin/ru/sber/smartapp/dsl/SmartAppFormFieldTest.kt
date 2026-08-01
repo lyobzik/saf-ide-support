@@ -270,6 +270,17 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         assertFalse(items.contains("age"))
     }
 
+    fun testFieldCompletionInUnclosedInterpolation() {
+        // В момент набора закрывающего }} ещё нет: completion полей работает
+        // и в незакрытой интерполяции (контекст достраивается синтетическим }}).
+        val items = completeAt(
+            "static/references/scenarios/unclosed.json",
+            """{ "unclosed": { "type": "form_filling", "form": "hello_form", "g": "{{ main_form.<caret>" } }""",
+        )
+        assertTrue("completion полей в незакрытой интерполяции: $items", items.contains("name"))
+        assertTrue(items.contains("age"))
+    }
+
     // ---- unresolved WARNING --------------------------------------------
 
     fun testUnresolvedFieldIsWarning() {

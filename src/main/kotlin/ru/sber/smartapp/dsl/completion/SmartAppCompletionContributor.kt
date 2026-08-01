@@ -135,7 +135,11 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         // completion полей активируется только внутри актуальной открытой
         // интерполяции {{ … }} — не в statement-теге {% %} и не внутри
         // Jinja-строки (например default('{{ main_form.<caret>') — это STRING).
-        val interpOpenEnd = interpContextAt(decoded.text, decodedCaret) ?: return
+        // Fallback с достроенным "}}": в момент набора интерполяция обычно ещё
+        // не закрыта ({{ main_form.<caret>), и лексер отдаёт её как TEXT.
+        val interpOpenEnd = interpContextAt(decoded.text, decodedCaret)
+            ?: interpContextAt(decoded.text + "}}", decodedCaret)
+            ?: return
         // Между `{{` и кареткой должен быть ровно `main_form.` (с допуском пробелов).
         // containsMatchIn: completion подставляет dummy после точки, matches требовал
         // бы пустой хвост.
