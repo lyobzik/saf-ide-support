@@ -116,7 +116,9 @@ object SmartAppJinjaLexer {
     /**
      * Находит семантические кандидаты `main_form.<id>` внутри интерполяций
      * `{{ … }}` (statement-теги `{% … %}` исключены). Допускает whitespace между
-     * `main_form`, `.` и именем поля. Возвращает кандидаты в порядке встречи.
+     * `main_form`, `.` и именем поля. Цепочки не разбираются: `main_form` в
+     * позиции чужого поля (`variables.main_form.x`) и подобъекты
+     * (`main_form.x.y`) кандидатов не дают. Возвращает кандидаты в порядке встречи.
      */
     fun fieldCandidates(decodedText: String): List<SmartAppFieldCandidate> {
         val tokens = tokenize(decodedText)
@@ -220,13 +222,28 @@ object SmartAppJinjaLexer {
                 break
             }
             if (t.type == VAR && text.substring(t.range.startOffset, t.range.endOffset) == "main_form") {
+                // Левая граница: main_form в позиции чужого поля
+                // (variables.main_form.x) — не наша семантика, пропускаем.
+                val prev = neighborSkippingWhitespace(text, tokens, j - 1, -1)
+                if (prev != null && prev.type == DOT) {
+                    j++
+                    continue
+                }
                 val dot = nextSkippingWhitespace(text, tokens, j + 1)
                 val field = if (dot != null && dot.type == DOT)
                     nextSkippingWhitespace(text, tokens, tokens.indexOf(dot) + 1) else null
                 if (field != null && field.type == VAR) {
+                    val fieldIdx = tokens.indexOf(field)
+                    // Правая граница: подобъекты main_form.x.y не разбираем —
+                    // ссылку и WARNING не создаём вовсе.
+                    val next = neighborSkippingWhitespace(text, tokens, fieldIdx + 1, +1)
+                    if (next != null && next.type == DOT) {
+                        j = fieldIdx + 1
+                        continue
+                    }
                     val fieldName = text.substring(field.range.startOffset, field.range.endOffset)
                     result.add(SmartAppFieldCandidate("main_form", fieldName, field.range))
-                    j = tokens.indexOf(field) + 1
+                    j = fieldIdx + 1
                     continue
                 }
             }
@@ -267,6 +284,28 @@ object SmartAppJinjaLexer {
             val slice = text.substring(t.range.startOffset, t.range.endOffset)
             if (!slice.all { it.isWhitespace() }) return null
             k++
+        }
+        return null
+    }
+
+    /**
+     * Соседний токен в направлении [step] (+1/-1), пропуская только TEXT из
+     * whitespace. В отличие от [nextSkippingWhitespace], не-whitespace TEXT —
+     * полноценный сосед: для проверки границ триплета важен именно DOT.
+     */
+    private fun neighborSkippingWhitespace(
+        text: String,
+        tokens: List<SmartAppJinjaToken>,
+        fromIdx: Int,
+        step: Int,
+    ): SmartAppJinjaToken? {
+        var k = fromIdx
+        while (k in tokens.indices) {
+            val t = tokens[k]
+            if (t.type != TEXT) return t
+            val slice = text.substring(t.range.startOffset, t.range.endOffset)
+            if (!slice.all { it.isWhitespace() }) return t
+            k += step
         }
         return null
     }
