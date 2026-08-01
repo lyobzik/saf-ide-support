@@ -23,7 +23,7 @@ import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType.VAR
  * пропуск закрывающих разделителей внутри строк.
  *
  * Лексер принимает decoded-текст (JSON escape уже раскрыты); regression для
- * raw-escape проверяет separately через [JsonStringLiteralDecoder] в
+ * raw-escape проверяется отдельно через [JsonStringLiteralDecoder] в
  * интеграционных тестах.
  */
 class SmartAppJinjaLexerTest {
