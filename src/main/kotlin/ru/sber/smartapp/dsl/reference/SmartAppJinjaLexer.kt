@@ -81,7 +81,7 @@ data class SmartAppFieldCandidate(val form: String, val field: String, val field
  *
  * Все смещения — относительно [decodedText], переданного в [tokenize]. Перевод в
  * absolute-диапазоны документа — ответственность вызывающего через карту
- * raw→decoded (см. [JsonStringLiteralDecoder]).
+ * decoded→raw (см. [JsonStringLiteralDecoder]).
  */
 object SmartAppJinjaLexer {
 
