@@ -155,6 +155,10 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
             .dropWhile { it.isWhitespace() }
         val fieldResult = result.withPrefixMatcher(fieldPrefix)
         for (field in SmartAppFormFieldNameIndex.allNames(project, form, scope)) {
+            // Поля с не-identifier именами (точки, двоеточия, дефисы) лексер
+            // резолвить не способен — в completion не предлагаем (контракт v1;
+            // синтаксис доступа к таким полям — отдельное проектирование).
+            if (!isLexerIdentifier(field)) continue
             fieldResult.addElement(
                 PrioritizedLookupElement.withPriority(
                     LookupElementBuilder.create(field).withTypeText("field"),
@@ -163,6 +167,15 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
             )
         }
     }
+
+    /**
+     * `true`, если [name] — идентификатор в терминах лексера
+     * (`isJavaIdentifierStart`/`isJavaIdentifierPart`): только такие имена полей
+     * резолвятся из `{{ main_form.<field> }}`.
+     */
+    private fun isLexerIdentifier(name: String): Boolean =
+        name.isNotEmpty() && name.first().isJavaIdentifierStart() &&
+            name.asSequence().drop(1).all { it.isJavaIdentifierPart() }
 
     /**
      * Позиция каретки в decoded-координатах: число decoded-символов, чей
