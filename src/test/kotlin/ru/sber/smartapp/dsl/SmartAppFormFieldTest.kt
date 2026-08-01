@@ -320,6 +320,28 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         assertTrue(items.contains("age"))
     }
 
+    fun testNoFieldCompletionInSubobjectChain() {
+        // {{ main_form.x.<caret> }} — позиция цепочки: резолв для main_form.x.y
+        // отключён, completion не должен предлагать заведомо битые варианты.
+        val items = completeAt(
+            "static/references/scenarios/subchain.json",
+            """{ "subchain": { "type": "form_filling", "form": "hello_form", "g": "{{ main_form.x.<caret> }}" } }""",
+        )
+        assertFalse("в позиции цепочки нет completion полей", items.contains("name"))
+        assertFalse(items.contains("age"))
+    }
+
+    fun testNoFieldCompletionAfterNonIdentifierStart() {
+        // {{ main_form.2<caret> }} — частичное имя не является идентификатором:
+        // completion полей не активируется.
+        val items = completeAt(
+            "static/references/scenarios/digit.json",
+            """{ "digit": { "type": "form_filling", "form": "hello_form", "g": "{{ main_form.2<caret> }}" } }""",
+        )
+        assertFalse("после не-identifier начала нет completion полей", items.contains("name"))
+        assertFalse(items.contains("age"))
+    }
+
     fun testCompletionSkipsNonIdentifierFieldNames() {
         // Поле с пунктуацией в имени (contact.email) лексер резолвить не способен —
         // completion его не предлагает; обычные поля предлагаются.
