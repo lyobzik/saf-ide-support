@@ -61,7 +61,7 @@ object JsonStringLiteralDecoder {
             sb.append(c)
             i++
         }
-        // Сенtinel: end-смещение последнего decoded-символа.
+        // Sentinel: end-смещение последнего decoded-символа.
         rawStarts[sb.length] = n
         return Decoded(sb.toString(), rawStarts)
     }
