@@ -61,7 +61,7 @@ class SmartAppColorSettingsPage : ColorSettingsPage {
             AttributesDescriptor("Jinja:: разделитель", SmartAppTextAttributes.JINJA_DELIM),
             AttributesDescriptor("Jinja:: переменная", SmartAppTextAttributes.JINJA_VAR),
             AttributesDescriptor("Jinja:: оператор (.)", SmartAppTextAttributes.JINJA_OP),
-            AttributesDescriptor("Jinja:: фильтр (|)", SmartAppTextAttributes.JINJA_FILTER),
+            AttributesDescriptor("Jinja:: фильтр (| и имя)", SmartAppTextAttributes.JINJA_FILTER),
             AttributesDescriptor("Jinja:: строка", SmartAppTextAttributes.JINJA_STRING),
         )
     }
