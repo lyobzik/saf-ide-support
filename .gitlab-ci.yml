@@ -12,6 +12,7 @@
 stages:
   - contract
   - test
+  - package
 
 variables:
   GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
@@ -29,6 +30,24 @@ default:
     paths:
       - .gradle/caches
       - .gradle/wrapper
+
+# Артефакты собираются автоматически по релизному тегу и по кнопке — на
+# остальных ветках. Гонять упаковку на каждый MR незачем: тесты и контракты и
+# так прогоняются, а zip с vsix нужны только когда их кто-то собирается забрать.
+#
+# Релизный тег — `v<version>`; что он совпадает с версией в манифестах,
+# проверяет contract:version до стадии package. Тег другого вида упаковку не
+# запускает вовсе — ни автоматически, ни кнопкой: пусть лучше не будет
+# артефактов, чем появятся артефакты, чья версия противоречит имени тега.
+# Ручная упаковка остаётся там, где тега нет и обещать он ничего не может, —
+# на ветках.
+.release:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: manual
+      allow_failure: true
 
 .node:
   image: node:22-bookworm
@@ -57,6 +76,16 @@ contract:keywords:
   script:
     # Словарь обязан соответствовать vendored-исходнику фреймворка.
     - python tools/generate_keywords.py --check
+
+contract:version:
+  # Скрипту нужен только sh; образ тот же, что у contract:keywords, чтобы не
+  # тянуть на runner лишний слой ради двух строк sed.
+  image: python:3.12-slim
+  stage: contract
+  script:
+    # Номер версии живёт в двух манифестах и в имени тега: разошлись — и
+    # непонятно, какие zip и vsix составляют одну пару и что вообще за релиз.
+    - sh tools/check-version.sh "$CI_COMMIT_TAG"
 
 contract:schema:
   extends: .node
@@ -112,3 +141,30 @@ test:vscode:integration:
   script:
     # Настоящий VS Code: регистрация провайдеров и активация расширения.
     - xvfb-run -a npm run test:integration
+
+# --- package ----------------------------------------------------------------
+
+package:idea:
+  extends:
+    - .gradle
+    - .release
+  stage: package
+  script:
+    - ./gradlew $GRADLE_ARGS :idea-plugin:packagePlugin
+  artifacts:
+    paths:
+      - dist/*.zip
+    expire_in: 1 month
+
+package:vscode:
+  extends:
+    - .node
+    - .release
+  stage: package
+  script:
+    # Состав .vsix проверяет сам scripts/package.mjs.
+    - npm run package
+  artifacts:
+    paths:
+      - dist/*.vsix
+    expire_in: 1 month
