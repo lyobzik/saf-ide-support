@@ -1,5 +1,6 @@
 .gradle/
 build/
+dist/
 .tooling/
 .intellijPlatform/
 .kotlin/

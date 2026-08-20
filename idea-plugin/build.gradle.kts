@@ -1,3 +1,5 @@
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import org.gradle.api.tasks.options.Option
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -10,6 +12,13 @@ plugins {
 
 group = "ru.sber.smartapp"
 version = "0.1.0"
+
+/**
+ * Базовое имя артефакта релиза. Обе стороны называются одинаково
+ * (`smartapp-dsl-<версия>.zip` и `smartapp-dsl-<версия>.vsix`), и по этому же
+ * имени упаковка отличает свои файлы в `dist/` от чужих.
+ */
+val artifactName = "smartapp-dsl"
 
 repositories {
     mavenCentral()
@@ -58,7 +67,7 @@ dependencies {
 intellijPlatform {
     // Имя модуля (`idea-plugin`) описывает его место в монорепозитории, а имя
     // артефакта должно остаться прежним: smartapp-dsl-<версия>.zip.
-    projectName = "smartapp-dsl"
+    projectName = artifactName
 
     pluginConfiguration {
         ideaVersion {
@@ -142,4 +151,64 @@ val exportRules by tasks.registering(ExportRulesTask::class) {
     classpath = files(sourceSets.main.get().output, contractExport)
     mainClass = "ru.sber.smartapp.dsl.contract.ExportRules"
     outputFile.set(rootProject.layout.projectDirectory.file("shared/rules/rules.json"))
+}
+
+/** Общий каталог артефактов релиза: сюда же расширение кладёт свой `.vsix`. */
+val distDir = rootProject.layout.projectDirectory.dir("dist")
+
+/** Промежуточный каталог упаковки — тот же, через который проходит `.vsix`. */
+val stagingDir = distDir.dir(".staging")
+
+/**
+ * Кладёт собранный zip плагина в общий каталог `dist/` — туда же, куда
+ * расширение кладёт свой `.vsix`. Сборку по-прежнему делает `buildPlugin`;
+ * здесь только публикация, чтобы у релиза монорепозитория было одно место, а не
+ * каталоги двух разных систем сборки.
+ *
+ * Копирование идёт в `dist/.staging/`, а в `dist/` файл попадает переносом —
+ * той же атомарной заменой, что и `.vsix`. Прямое копирование в `dist/` может
+ * прерваться (остановленный процесс, ошибка ФС) и оставить опубликованным
+ * обрезанный архив: при совпадении версий — поверх рабочего.
+ */
+val packagePlugin by tasks.registering(Copy::class) {
+    group = "build"
+    description = "Собирает zip плагина и кладёт его в dist/"
+    from(tasks.named("buildPlugin"))
+    into(stagingDir)
+
+    // Задача всегда выполняется: иначе на «актуальном» прогоне не отработает
+    // публикация и уборка. Копирование одного файла того не стоит, чтобы на
+    // нём экономить.
+    outputs.upToDateWhen { false }
+
+    val artifacts = distDir.asFile
+    val staging = stagingDir.asFile
+    val currentZip = tasks.named<Zip>("buildPlugin").flatMap { it.archiveFileName }
+
+    // Остатки прерванного прогона: незавершённый архив не должен попасть в
+    // релиз ни при каком следующем запуске.
+    doFirst { staging.deleteRecursively() }
+
+    doLast {
+        val name = currentZip.get()
+        Files.move(
+            staging.resolve(name).toPath(),
+            artifacts.resolve(name).toPath(),
+            StandardCopyOption.REPLACE_EXISTING,
+            StandardCopyOption.ATOMIC_MOVE,
+        )
+        staging.deleteRecursively()
+
+        // Дистрибутив прошлой версии рядом с новым — это шанс поставить или
+        // выложить не тот файл: и упаковка, и CI забирают zip маской
+        // `dist/*.zip`. Убираем после публикации и только своё: `dist/` —
+        // каталог релиза, но не собственность этой сборки, и чужой архив тут
+        // удалять не за что.
+        artifacts.listFiles { file ->
+            file.isFile &&
+                file.name != name &&
+                file.name.startsWith("$artifactName-") &&
+                file.name.endsWith(".zip")
+        }?.forEach { it.delete() }
+    }
 }
