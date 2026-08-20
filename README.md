@@ -1,4 +1,9 @@
-# SmartApp DSL — плагин для IntelliJ IDEA
+# SmartApp DSL — поддержка в IntelliJ IDEA и VS Code
+
+Репозиторий содержит **две** реализации поддержки одного языка: плагин для
+IntelliJ-платформы (`idea-plugin/`) и расширение для VS Code
+(`vscode-extension/`). Обе понимают одну и ту же семантику и держатся вместе
+общими контрактами из `shared/` — подробнее в разделе «Монорепозиторий».
 
 Плагин добавляет поддержку DSL-сценариев фреймворка **Sber SmartApp Framework**
 (`smart_app_framework`) прямо в IDE. Сценарии этого фреймворка описываются не
@@ -19,9 +24,10 @@
 - **Поля форм в Jinja** — навигация, автодополнение и подсветка разметки в
   интерполяциях `{{ main_form.<field> }}` (подробнее ниже).
 
-Плагин не вводит собственный язык или лексер, а строит семантический слой поверх
-встроенного JSON-парсера IDE. Поэтому работает в любой IDE на платформе IntelliJ,
-где есть бандл-плагин JSON (IDEA Community/Ultimate, PyCharm, GIGA IDE и др.).
+Ни плагин, ни расширение не вводят собственный язык или лексер: оба строят
+семантический слой поверх встроенного JSON-парсера редактора. Плагин работает в
+любой IDE на платформе IntelliJ, где есть бандл-плагин JSON (IDEA
+Community/Ultimate, PyCharm, GIGA IDE и др.); расширение — в VS Code 1.90+.
 
 ## Поля форм в Jinja-значениях
 
@@ -52,6 +58,30 @@ statement-теги `{% … %}` семантики не получают (под�
 `{{ x + main_form.<caret> }}` поле резолвится, но варианты пока не
 предлагаются). Jinja работает и в строковых элементах JSON-массивов, не только
 в значениях свойств.
+
+## Монорепозиторий: две реализации и общий контракт
+
+```text
+idea-plugin/        # плагин для IntelliJ-платформы (Kotlin, Gradle)
+vscode-extension/   # расширение для VS Code (TypeScript, npm)
+shared/
+  rules/rules.json      # контракт данных: виды, каталоги, правила ссылок, ключи
+  keywords/keywords.json  # словарь ключевых слов фреймворка
+  fixtures/             # conformance-корпус: общий для обеих реализаций
+tools/                # генератор словаря
+```
+
+Системы сборки намеренно не объединены: Gradle собирает плагин, npm — расширение.
+Вместе их держат два контракта:
+
+- **данные** — `shared/rules/rules.json` генерируется из Kotlin-таблиц плагина
+  (`./gradlew :idea-plugin:exportRules`) и читается расширением; править его
+  руками нельзя, `exportRules --check` следит за актуальностью снимка;
+- **поведение** — `shared/fixtures/` прогоняются и тестами плагина
+  (`SmartAppConformanceTest`), и тестами расширения. Расхождение алгоритмов
+  ловится только так, поэтому новая семантика без нового кейса не принимается.
+
+Оба контракта проверяются в CI (`.gitlab-ci.yml`, стадия `contract`).
 
 ## Установка готового плагина
 
@@ -84,19 +114,37 @@ statement-теги `{% … %}` семантики не получают (под�
 
 | Действие | Команда |
 |---|---|
-| Компиляция | `./gradlew compileKotlin` |
-| Тесты | `./gradlew test` |
-| Сборка ZIP-плагина | `./gradlew buildPlugin` → `build/distributions/smartapp-dsl-<версия>.zip` |
-| Запуск sandbox-IDE | `./gradlew runIde` |
-| Проверка совместимости | `./gradlew verifyPlugin` |
+| Компиляция | `./gradlew :idea-plugin:compileKotlin` |
+| Тесты | `./gradlew :idea-plugin:test` |
+| Сборка ZIP-плагина | `./gradlew :idea-plugin:buildPlugin` → `idea-plugin/build/distributions/smartapp-dsl-<версия>.zip` |
+| Запуск sandbox-IDE | `./gradlew :idea-plugin:runIde` |
+| Проверка совместимости | `./gradlew :idea-plugin:verifyPlugin` |
+| Экспорт контракта данных | `./gradlew :idea-plugin:exportRules` |
 
-Плагин компилируется и запускается против **локальной** IDE на платформе
-IntelliJ. Путь к ней задаётся параметром `localIdePath` в `gradle.properties`
+По умолчанию плагин компилируется и запускается против **локальной** IDE на
+платформе IntelliJ: путь задаётся параметром `localIdePath` в `gradle.properties`
 (по умолчанию — GIGA IDE) и переопределяется флагом:
 
 ```bash
-./gradlew buildPlugin -PlocalIdePath="/path/to/IDE.app"
+./gradlew :idea-plugin:buildPlugin -PlocalIdePath="/path/to/IDE.app"
 ```
+
+Там, где локальной IDE нет (CI, чужая машина), источник платформы переключается
+на maven-репозитории:
+
+```bash
+./gradlew :idea-plugin:test -PideSource=maven -PplatformVersion=2025.1
+```
+
+## Расширение для VS Code
+
+```bash
+npm --prefix vscode-extension install
+npm --prefix vscode-extension test          # контракты + ядро + адаптер + корпус
+npm --prefix vscode-extension run compile   # бандл out/extension.js
+```
+
+Установка и разработка описаны в [vscode-extension/README.md](vscode-extension/README.md).
 
 ## Технологический стек
 
@@ -118,7 +166,9 @@ IntelliJ. Путь к ней задаётся параметром `localIdePath
 python tools/generate_keywords.py [путь-к-resources__init__.py]
 ```
 
-Результат — `src/main/resources/keywords/keywords.json`. В репозитории лежит
+Результат — `shared/keywords/keywords.json` (общий для обеих реализаций; в
+ресурсы плагина он копируется на этапе сборки). Режим `--check` проверяет, что
+закоммиченный словарь соответствует vendored-исходнику. В репозитории лежит
 vendored-копия исходника фреймворка (`tools/vendor/`), поэтому генератор можно
 запускать без доступа к самому фреймворку. Перезапускайте генерацию при
 обновлении версии фреймворка.
@@ -126,14 +176,18 @@ vendored-копия исходника фреймворка (`tools/vendor/`), �
 ## Структура проекта
 
 ```
-build.gradle.kts, settings.gradle.kts, gradle.properties   # сборка
-gradle/wrapper/, gradlew                                    # Gradle wrapper (9.0)
-tools/generate_keywords.py, tools/vendor/                   # генератор словаря
-src/main/kotlin/ru/sber/smartapp/dsl/                       # исходники плагина
-src/main/resources/META-INF/plugin.xml                      # дескриптор плагина
-src/main/resources/keywords/keywords.json                  # сгенерированный словарь
-src/test/kotlin/ru/sber/smartapp/dsl/                       # тесты
-docs/plans/, docs/insights/, arch/, mds/                    # материалы для AI-агентов
+settings.gradle.kts, gradle.properties, gradlew   # сборка плагина (Gradle 9)
+.gitlab-ci.yml                                    # CI: контракты + тесты обеих сторон
+idea-plugin/build.gradle.kts                      # модуль плагина
+idea-plugin/src/main/kotlin/ru/sber/smartapp/dsl/ # исходники плагина
+idea-plugin/src/main/resources/META-INF/plugin.xml # дескриптор плагина
+idea-plugin/src/test/kotlin/                      # тесты плагина
+vscode-extension/src/core/                        # ядро расширения (без vscode API)
+vscode-extension/src/vscode/                      # адаптер VS Code
+vscode-extension/test/                            # тесты ядра, адаптера, корпуса, интеграции
+shared/rules/, shared/keywords/, shared/fixtures/ # общие контракты
+tools/generate_keywords.py, tools/vendor/         # генератор словаря
+docs/plans/, docs/insights/, arch/, mds/          # материалы для AI-агентов
 ```
 
 ## Документация для разработчиков

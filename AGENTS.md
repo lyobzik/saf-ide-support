@@ -1,4 +1,4 @@
-# SmartApp DSL — плагин для IntelliJ IDEA
+# SmartApp DSL — плагин для IntelliJ IDEA и расширение для VS Code
 
 ## Обзор проекта
 
@@ -9,8 +9,10 @@
 файла — это именованные определения сущностей; «ключевые слова» — значения поля
 `type`, зарегистрированные в исходниках фреймворка.
 
-Плагин не вводит свой язык/лексер, а строит **семантический слой поверх
-встроенного JSON-парсера IDEA**. Возможности:
+Поддержка реализована **дважды**: плагин для IntelliJ-платформы (`idea-plugin/`)
+и расширение для VS Code (`vscode-extension/`). Ни одна из реализаций не вводит
+свой язык/лексер — обе строят **семантический слой поверх встроенного
+JSON-парсера редактора**. Возможности (одинаковые с обеих сторон):
 
 - подсветка ключевых слов и структурных ключей;
 - переход к определению сущности (Go to Definition / Ctrl+Click);
@@ -20,9 +22,52 @@
 - навигация, автодополнение и подсветка полей форм в Jinja-интерполяциях
   `{{ main_form.<field> }}` (scope — только плоский доступ к полю).
 
+## Монорепозиторий и два контракта
+
+```text
+idea-plugin/        # плагин IntelliJ (Kotlin, Gradle)
+vscode-extension/   # расширение VS Code (TypeScript, npm)
+shared/             # общие контракты: rules, keywords, fixtures
+tools/              # генератор словаря
+.gitlab-ci.yml      # единственный общий gate
+```
+
+Системы сборки не объединяются: Gradle собирает плагин, npm — расширение.
+Согласованность держат **два** контракта, у каждого своя fail-closed проверка:
+
+| Контракт | Артефакт | Проверка |
+|---|---|---|
+| Данные: виды, каталоги, сегменты пути, ссылочные правила, ключи контекста `type`, структурные ключи, `form`/`fields`, `main_form`, словарь | `shared/rules/rules.json`, `shared/keywords/keywords.json` (+ схемы) | `:idea-plugin:exportRules --check`, `generate_keywords.py --check`, `npm run verify:contract` |
+| Поведение: резолв, диагностика, completion, Jinja, изоляция наборов, строгость индексации | `shared/fixtures/**` | `SmartAppConformanceTest` (Kotlin) и `test/conformance` (TS) на одном корпусе |
+
+Правила работы с контрактом:
+
+- **`rules.json` не редактируется руками** — это снимок Kotlin-таблиц
+  (`contract/SmartAppContract.kt`), генерируемый таском `exportRules`.
+  Меняется семантика → правятся таблицы → перегенерируется снимок.
+- `contractVersion` живёт в `SmartAppContract.VERSION` и увеличивается при любом
+  **несовместимом** изменении структуры данных; синхронно правятся `const` в
+  `shared/rules/rules.schema.json` и `EXPECTED_CONTRACT_VERSION` в
+  `vscode-extension/src/core/contract.ts`.
+- Новая семантика **без нового кейса в `shared/fixtures` не принимается**: общий
+  `rules.json` фиксирует данные, но не алгоритмы.
+- В `vscode-extension/src/core/**` не должно быть литералов DSL-имён
+  (`"scenarios"`, `"static"`, `"form"`, `"fields"`, `"main_form"`, `".json"`) —
+  они приходят из контракта через единственный модуль `contract.ts`; eslint
+  проверяет запрет импорта, остальное — на ревью.
+- То же правило действует и в Kotlin: имена ключей берутся из
+  `FieldAccessSpec`/`TypeContextSpec`, а не пишутся строкой в индексаторах и
+  провайдерах. Соответствие «структурный ключ → категория ключевых слов» тоже
+  часть контракта (`typeContext.keyCategories`), а не `when`-ветка в двух
+  реализациях сразу.
+- **Поиск файлов в VS Code идёт по контракту**: glob строится из
+  `paths.rootSegments`, а расширение файла в шаблон не входит — контракт
+  допускает игнорирование регистра (`.JSON`), а glob в VS Code
+  регистрозависим. Отбор делает `isDslFile`.
+
 ## Ключевые компоненты
 
-Исходники: `src/main/kotlin/ru/sber/smartapp/dsl/`
+Исходники плагина: `idea-plugin/src/main/kotlin/ru/sber/smartapp/dsl/`
 
 | Компонент | Назначение |
 |---|---|
@@ -48,6 +93,24 @@
 | `reference/SmartAppFieldReference` | Поли-вариантная ссылка на поле формы; диапазон только на имя поля |
 | `completion/SmartAppCompletionContributor` | `DumbAware`-автодополнение ключевых слов, имён сущностей и полей формы в `{{ main_form.<caret> }}` (только identifier-имена) |
 | `findusages/SmartAppFindUsagesProvider` + `…ElementDescriptionProvider` | Find Usages для определений и полей форм (подпись `<form>.<field>`), человекочитаемые подписи |
+| `rename/SmartAppRenameProcessor` | Ограничивает rename ссылками плагина в своём наборе `references`: иначе платформа переписывает одноимённые ключи чужих наборов |
+| `contract/SmartAppContract` + `SmartAppSpecs` | Таблицы данных DSL (виды, ссылочные правила, ключи контекста, структурные ключи, пути, `main_form`) — их использует рантайм и сериализует экспортёр |
+| `contract/ExportRules` | Сериализация тех же таблиц в `shared/rules/rules.json`; режим `--check` для CI |
+
+Исходники расширения: `vscode-extension/src/`
+
+| Компонент | Назначение |
+|---|---|
+| `core/contract.ts` | Единственный потребитель `shared/`: сверяет `contractVersion`, отдаёт типизированные данные |
+| `core/files.ts`, `core/refKind.ts` | `kindOf`/`referencesRoot` по URI; каталоги и виды — из контракта |
+| `core/ast.ts` | Обёртки над `jsonc-parser` вместо PSI-навигации |
+| `core/jsonDecode.ts`, `core/jinjaLexer.ts` | Порты `JsonStringLiteralDecoder` и `SmartAppJinjaLexer` (1:1) |
+| `core/refRules.ts`, `core/typeContext.ts`, `core/fieldRef.ts` | Порты одноимённых Kotlin-объектов |
+| `core/indexGate.ts` | Строгость индексации — эквивалент `JsonPsi.hasError` |
+| `core/index.ts` | Воркспейс-индекс вместо четырёх `FileBasedIndex` + обратный индекс использований |
+| `core/semantics.ts`, `core/completion.ts`, `core/semanticTokens.ts`, `core/rename.ts` | Резолв, диагностика, автодополнение, подсветка, переименование — всё в смещениях |
+| `vscode/workspace.ts` | `findFiles`, watcher, дебаунс, хранилище текстов; кормит ядро через `upsert`/`remove` |
+| `vscode/providers.ts`, `vscode/positions.ts` | Провайдеры VS Code и трансляция смещений в `Position` |
 
 Ресурсы: `src/main/resources/META-INF/plugin.xml`,
 `src/main/resources/keywords/keywords.json` (генерируется).
@@ -79,13 +142,22 @@
 
 | Действие | Команда |
 |---|---|
-| Компиляция | `./gradlew compileKotlin` |
-| Тесты | `./gradlew test` |
-| Сборка плагина (zip) | `./gradlew buildPlugin` → `build/distributions/smartapp-dsl-<version>.zip` |
-| Запуск sandbox-IDE | `./gradlew runIde` |
-| Проверка совместимости | `./gradlew verifyPlugin` |
-| Регенерация словаря | `python tools/generate_keywords.py [path-to-resources__init__.py]` |
-| Словарь из другого IDE | `./gradlew … -PlocalIdePath="/path/to/IDE.app"` |
+| Компиляция плагина | `./gradlew :idea-plugin:compileKotlin` |
+| Тесты плагина | `./gradlew :idea-plugin:test` |
+| Сборка плагина (zip) | `./gradlew :idea-plugin:buildPlugin` → `idea-plugin/build/distributions/smartapp-dsl-<version>.zip` |
+| Запуск sandbox-IDE | `./gradlew :idea-plugin:runIde` |
+| Проверка совместимости | `./gradlew :idea-plugin:verifyPlugin` |
+| Экспорт контракта данных | `./gradlew :idea-plugin:exportRules` (проверка: `--check`) |
+| Сборка против maven-платформы | `./gradlew :idea-plugin:test -PideSource=maven` |
+| Регенерация словаря | `python tools/generate_keywords.py [path-to-resources__init__.py]` (проверка: `--check`) |
+| Тесты расширения | `npm --prefix vscode-extension test` |
+| Интеграционные тесты VS Code | `npm --prefix vscode-extension run test:integration` |
+| Бандл расширения | `npm --prefix vscode-extension run compile` |
+
+> Gradle в этом окружении иногда не замечает правки, сделанные извне IDE
+> (устаревший кэш file-watching), и берёт классы из прошлой компиляции.
+> Если тест ведёт себя так, будто изменения не применились, повторите команду с
+> `--no-watch-fs`.
 
 **Деплой / установка:** собрать `buildPlugin`, затем в IDE
 Settings → Plugins → ⚙ → *Install Plugin from Disk…* и выбрать zip из
@@ -119,18 +191,22 @@ Settings → Plugins → ⚙ → *Install Plugin from Disk…* и выбрать
 ## Структура проекта и игнорируемые каталоги
 
 ```
-build.gradle.kts, settings.gradle.kts, gradle.properties   # сборка
-gradle/wrapper/, gradlew                                    # Gradle wrapper (9.0)
-tools/generate_keywords.py, tools/vendor/                   # генератор словаря
-src/main/kotlin/ru/sber/smartapp/dsl/                       # исходники плагина
-src/main/resources/META-INF/plugin.xml                      # дескриптор
-src/main/resources/keywords/keywords.json                  # сгенерированный словарь
-src/test/kotlin/ru/sber/smartapp/dsl/                       # тесты
-docs/plans/, docs/insights/, arch/, mds/                    # материалы для AI-агентов
+settings.gradle.kts, gradle.properties, gradlew    # сборка плагина (Gradle 9)
+.gitlab-ci.yml                                     # CI: контракты + тесты обеих сторон
+idea-plugin/build.gradle.kts                       # модуль плагина
+idea-plugin/src/main/kotlin/ru/sber/smartapp/dsl/  # исходники плагина
+idea-plugin/src/main/resources/META-INF/plugin.xml # дескриптор
+idea-plugin/src/test/kotlin/                       # тесты плагина
+vscode-extension/src/core/, src/vscode/            # ядро и адаптер расширения
+vscode-extension/test/                             # тесты ядра, адаптера, корпуса, интеграции
+shared/rules/, shared/keywords/, shared/fixtures/  # общие контракты
+tools/generate_keywords.py, tools/vendor/          # генератор словаря
+docs/plans/, docs/insights/, arch/, mds/           # материалы для AI-агентов
 ```
 
 Игнорируется (`.gitignore`): `.gradle/`, `build/`, `.tooling/`, `*.iml`,
-`.idea/`, `out/`, `.intellijPlatform/`.
+`.idea/`, `out/`, `.intellijPlatform/`, `node_modules/`,
+`vscode-extension/out/`, `vscode-extension/.vscode-test/`, `*.vsix`.
 
 ## Важные паттерны
 
@@ -165,6 +241,33 @@ docs/plans/, docs/insights/, arch/, mds/                    # материалы
 - **Изоляция наборов** (`SmartAppScopes`) — резолв/completion ограничены
   каталогом `references` исходного файла, чтобы в монорепо ссылки не утекали в
   чужой `static/references`.
+- **Rename изолирован по набору `references`.** JSON-плагин платформы связывает
+  одноимённые ключи разных файлов, поэтому штатный рефакторинг переписывал бы
+  одноимённые определения в чужих `static/references`. Область переименования
+  сужает `SmartAppRenameProcessor` — та же изоляция, что у резолва.
+- **Неоднозначные ссылки не переименовываются.** Правило `action` в
+  external-обёртке допускает и `ACTION`, и `BEHAVIOR`. Вид определяется по
+  фактически найденным определениям: один вид — переименовываем, несколько —
+  отказываем с объяснением (`renameLookupAt` возвращает `reason`). Молча выбрать
+  первый вид значило бы переименовать не ту сущность.
+- **Позиции в корпусе однозначны.** Ожидание описывается строкой и текстом; если
+  такой текст встречается в строке дважды, обязательна колонка — иначе кейс не
+  различает два одинаковых имени и оба раннера падают.
+- **Снимки файлов версионируются.** Чтения асинхронны и завершаются не в том
+  порядке, в каком начались, поэтому у каждого URI есть номер поколения:
+  «догнавшее» старое чтение не затирает свежее содержимое.
+- **Диапазоны: ссылка и диагностика — разные вещи.** Использование покрывает имя
+  без кавычек (`rangeInElement` в IDEA), предупреждение — литерал целиком.
+- **Строгость JSON применяется только к вкладу файла в индекс.** `JsonPsi.hasError`
+  вызывается лишь в индексаторах: подсветка, ссылки, диагностика и completion
+  работают и на битом файле (в IDEA — по частичному PSI, в расширении — по
+  частичному дереву `jsonc-parser`). Гасить их на каждой незакрытой скобке во
+  время набора — не то поведение, что есть у пользователей сегодня.
+- **Комментарии и висячие запятые ошибкой не считаются** — так ведёт себя JSON PSI
+  IntelliJ. Это измеренное поведение платформы, а не решение: оно зафиксировано
+  характеризационными тестами (`SmartAppStrictJsonContractTest`) и определяет
+  настройки `jsonc-parser` в расширении. Меняется платформа — сначала правятся
+  эти тесты, потом обе реализации.
 - **Версионирование индексов:** при изменении формата сериализации увеличивать
   `getVersion()` соответствующего индекса —
   `SmartAppDefinitionExternalizer.SERIALIZATION_VERSION` для индексов определений
@@ -183,6 +286,24 @@ docs/plans/, docs/insights/, arch/, mds/                    # материалы
 
 ### Тестирование
 
+Тестов три уровня, и все три обязательны:
+
+1. **Плагин IDEA** — `BasePlatformTestCase`, включая прогон общего корпуса
+   (`SmartAppConformanceTest`).
+2. **Ядро расширения** — vitest поверх `src/core`, включая тот же корпус
+   (`test/conformance`). Работает без редактора.
+3. **Адаптер расширения** — vitest поверх `src/vscode` с фейковым модулем
+   `vscode` (`test/mocks/vscode.ts`) плюс smoke в настоящем VS Code
+   (`test/integration`). Ядро оперирует смещениями, а пользователь видит
+   результат адаптера: ошибки offset→`Position`, `Uri`, диапазона
+   `CompletionItem` и содержимого `WorkspaceEdit` видны только здесь.
+
+Что фиксирует корпус, а что нет: **состав** результатов (определения, диагностики,
+варианты автодополнения, токены) — да; **порядок** имён в индексе и вариантов
+автодополнения — нет, его задают сортировщики платформ. Каретку в completion-кейсах
+ставьте в позицию с пустым префиксом, иначе IDEA отфильтрует список своим prefix
+matcher'ом, а ядро расширения — нет.
+
 - Интеграционные тесты — `BasePlatformTestCase`; фикстуры добавляются через
   `myFixture.addFileToProject("static/references/<kind>/…", …)`, чтобы сработали
   определение `RefKind` и индексация.
@@ -197,13 +318,15 @@ docs/plans/, docs/insights/, arch/, mds/                    # материалы
 
 - Нет системных JDK / Gradle / `gh`. JDK — JBR внутри GIGA IDE
   (`…/Contents/jbr/Contents/Home`), Gradle — через wrapper, GitHub — через
-  `curl` к API.
-- `localIdePath` в `gradle.properties` указывает на локальную IDE; переопределяется
-  флагом `-PlocalIdePath=…`.
+  `curl` к API. Node и npm — есть (нужны расширению).
+- `ideSource=local` (по умолчанию) берёт платформу из локальной IDE по
+  `localIdePath`; `ideSource=maven` — из maven-репозиториев по `platformVersion`.
+  CI работает только со вторым вариантом.
 
 ## Стиль кода
 
-- **Docstrings и комментарии — на русском языке.**
+- **Docstrings и комментарии — на русском языке** (в обеих реализациях: Kotlin и
+  TypeScript).
 - **Планы, инсайты и документы — на русском** (`docs/plans/`, `docs/insights/`,
   `arch/`, `mds/`).
 - **Сообщения в логах — на английском.**
