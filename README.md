@@ -83,19 +83,40 @@ tools/                # генератор словаря
 
 Оба контракта проверяются в CI (`.gitlab-ci.yml`, стадия `contract`).
 
-## Установка готового плагина
+## Установка
 
-Плагин в Marketplace пока не публикуется — устанавливается из ZIP-файла «с диска».
+Ни плагин, ни расширение пока не публикуются в Marketplace — обе стороны
+ставятся из файла. Оба артефакта собираются одной командой в каталог `dist/`:
 
-1. **Получите ZIP-сборку плагина.** Файл называется
-   `smartapp-dsl-<версия>.zip` (например `smartapp-dsl-0.1.0.zip`):
-   - возьмите готовый артефакт из раздела релизов репозитория, **либо**
-   - соберите сами командой `./gradlew buildPlugin` — артефакт появится в
-     `build/distributions/smartapp-dsl-<версия>.zip` (см. «Сборка» ниже).
-2. В IDE откройте **Settings/Preferences → Plugins**.
-3. Нажмите на иконку шестерёнки ⚙ → **Install Plugin from Disk…**.
-4. Выберите скачанный/собранный ZIP-файл.
-5. Перезапустите IDE по запросу.
+```bash
+tools/package.sh
+```
+
+```text
+dist/smartapp-dsl-<версия>.zip     # плагин для IntelliJ-платформы
+dist/smartapp-dsl-<версия>.vsix    # расширение для VS Code
+```
+
+Готовые артефакты можно взять из раздела релизов репозитория или из артефактов
+джоб `package:idea` и `package:vscode` в CI: по тегу вида `v<версия>` они
+собираются автоматически, на ветках — по кнопке. Версия в теге обязана совпадать
+с версией в манифестах, иначе пайплайн падает до упаковки; на теге другого вида
+упаковки не будет и по кнопке.
+
+### Плагин для IDE на IntelliJ-платформе
+
+1. **Settings/Preferences → Plugins**.
+2. Иконка шестерёнки ⚙ → **Install Plugin from Disk…**.
+3. Выберите ZIP-файл.
+4. Перезапустите IDE по запросу.
+
+### Расширение для VS Code
+
+```bash
+code --install-extension dist/smartapp-dsl-<версия>.vsix
+```
+
+Либо **Extensions → … → Install from VSIX…**.
 
 После перезапуска откройте проект, содержащий каталог `static/references/…`, —
 подсветка, переход к определению, поиск использований и автодополнение заработают
@@ -117,6 +138,7 @@ tools/                # генератор словаря
 | Компиляция | `./gradlew :idea-plugin:compileKotlin` |
 | Тесты | `./gradlew :idea-plugin:test` |
 | Сборка ZIP-плагина | `./gradlew :idea-plugin:buildPlugin` → `idea-plugin/build/distributions/smartapp-dsl-<версия>.zip` |
+| Упаковка плагина в `dist/` | `./gradlew :idea-plugin:packagePlugin` → `dist/smartapp-dsl-<версия>.zip` |
 | Запуск sandbox-IDE | `./gradlew :idea-plugin:runIde` |
 | Проверка совместимости | `./gradlew :idea-plugin:verifyPlugin` |
 | Экспорт контракта данных | `./gradlew :idea-plugin:exportRules` |
@@ -142,6 +164,7 @@ tools/                # генератор словаря
 npm --prefix vscode-extension install
 npm --prefix vscode-extension test          # контракты + ядро + адаптер + корпус
 npm --prefix vscode-extension run compile   # бандл out/extension.js
+npm --prefix vscode-extension run package   # dist/smartapp-dsl-<версия>.vsix
 ```
 
 Установка и разработка описаны в [vscode-extension/README.md](vscode-extension/README.md).

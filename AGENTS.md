@@ -153,15 +153,57 @@ tools/              # генератор словаря
 | Тесты расширения | `npm --prefix vscode-extension test` |
 | Интеграционные тесты VS Code | `npm --prefix vscode-extension run test:integration` |
 | Бандл расширения | `npm --prefix vscode-extension run compile` |
+| Упаковка расширения (vsix) | `npm --prefix vscode-extension run package` → `dist/smartapp-dsl-<version>.vsix` |
+| Упаковка плагина в `dist/` | `./gradlew :idea-plugin:packagePlugin` → `dist/smartapp-dsl-<version>.zip` |
+| Упаковка обеих реализаций | `tools/package.sh` |
+| Сверка версий манифестов | `sh tools/check-version.sh` |
 
 > Gradle в этом окружении иногда не замечает правки, сделанные извне IDE
 > (устаревший кэш file-watching), и берёт классы из прошлой компиляции.
 > Если тест ведёт себя так, будто изменения не применились, повторите команду с
 > `--no-watch-fs`.
 
-**Деплой / установка:** собрать `buildPlugin`, затем в IDE
-Settings → Plugins → ⚙ → *Install Plugin from Disk…* и выбрать zip из
-`build/distributions/`. Публикация в Marketplace в v1 не настроена.
+**Деплой / установка.** `tools/package.sh` собирает оба артефакта релиза в
+`dist/`: `smartapp-dsl-<version>.zip` (плагин) и `smartapp-dsl-<version>.vsix`
+(расширение). Скрипт — тонкая обёртка над Gradle и npm, а не общая система
+сборки: каждую сторону по-прежнему можно собрать отдельно.
+
+- IDEA: Settings → Plugins → ⚙ → *Install Plugin from Disk…* и выбрать zip.
+- VS Code: `code --install-extension dist/smartapp-dsl-<version>.vsix` либо
+  Extensions → … → *Install from VSIX…*.
+
+Публикация в Marketplace/OpenVSX в v1 не настроена. Номер версии живёт в двух
+манифестах (`version` в `idea-plugin/build.gradle.kts` и в
+`vscode-extension/package.json`) — свести их в один источник нельзя, поэтому
+расхождение ловит `tools/check-version.sh` (джоба `contract:version`) до
+упаковки, а не пользователь по двум несовместимым артефактам.
+
+**Релизный тег — `v<version>`** (например `v0.1.0`). Тег — третье место, где
+записана версия, поэтому та же проверка сверяет его с манифестами:
+`CI_COMMIT_TAG` передаётся в `check-version.sh`, и `v0.2.0` на манифестах
+`0.1.0` роняет пайплайн до стадии `package`. Тег другого вида (`sandbox`)
+релизным не считается: на таком пайплайне джобы упаковки не появляются вовсе
+(правило `.release` гасит их через `when: never`), потому что проверить такой
+тег нечем — кнопка выдала бы артефакты, о версии которых тег ничего не обещает.
+Ручная упаковка остаётся на ветках, где тега нет.
+
+Обе стороны собираются в `dist/.staging/` и попадают в `dist/` переносом:
+`rename` в пределах одной ФС атомарен, поэтому прерванная упаковка (остановленный
+процесс, ошибка ФС) не оставляет опубликованным обрезанный архив — ни рядом с
+рабочим, ни поверх него. Для `.vsix` перенос делается ещё и после проверки
+состава пакета.
+
+Предыдущий артефакт убирается только после публикации нового и только свой:
+`packagePlugin` удаляет `smartapp-dsl-*.zip`, кроме собранного,
+`scripts/package.mjs` — `smartapp-dsl-*.vsix`, кроме нового. `dist/` — каталог
+релиза, но не собственность этих двух сборок: посторонний файл там не наш,
+чтобы его удалять. Порядок «сначала опубликовать» тоже важен: упавшая сборка не
+должна оставить `dist/` вообще без дистрибутива.
+
+Состав `.vsix` проверяется при упаковке: `scripts/package.mjs` требует бандл в
+пакете и запрещает исходники, тесты и sourcemap'ы. Опечатка в `.vscodeignore`
+сборку не ломает — она молча меняет содержимое пакета, поэтому проверка нужна
+здесь, а не на ревью.
 
 ## Каталоги для планов и исследований AI-агентов
 
@@ -201,10 +243,12 @@ vscode-extension/src/core/, src/vscode/            # ядро и адаптер 
 vscode-extension/test/                             # тесты ядра, адаптера, корпуса, интеграции
 shared/rules/, shared/keywords/, shared/fixtures/  # общие контракты
 tools/generate_keywords.py, tools/vendor/          # генератор словаря
+tools/package.sh, tools/check-version.sh           # упаковка обеих реализаций
+dist/                                              # артефакты релиза (zip + vsix)
 docs/plans/, docs/insights/, arch/, mds/           # материалы для AI-агентов
 ```
 
-Игнорируется (`.gitignore`): `.gradle/`, `build/`, `.tooling/`, `*.iml`,
+Игнорируется (`.gitignore`): `.gradle/`, `build/`, `dist/`, `.tooling/`, `*.iml`,
 `.idea/`, `out/`, `.intellijPlatform/`, `node_modules/`,
 `vscode-extension/out/`, `vscode-extension/.vscode-test/`, `*.vsix`.
 

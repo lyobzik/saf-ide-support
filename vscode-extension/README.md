@@ -28,13 +28,22 @@ JSON-файлы в каталоге `static/references/` (подкаталоги
 
 ```bash
 npm install
-npm run compile
-npx @vscode/vsce package
+npm run package
 ```
 
-Готовый `smartapp-dsl-<версия>.vsix` ставится через
-`code --install-extension smartapp-dsl-<версия>.vsix` либо через
-**Extensions → … → Install from VSIX…**.
+Пакет собирается в общий каталог релиза — `dist/smartapp-dsl-<версия>.vsix`
+рядом с zip-сборкой плагина IDEA. Ставится через
+
+```bash
+code --install-extension ../dist/smartapp-dsl-<версия>.vsix
+```
+
+либо через **Extensions → … → Install from VSIX…**.
+
+Бандл пересобирается самим `vsce` через хук `vscode:prepublish`, а состав пакета
+проверяется в `scripts/package.mjs`: бандл обязан быть внутри, исходники, тесты
+и sourcemap'ы — нет. Ошибка в `.vscodeignore` сборку не ломает, она молча меняет
+содержимое `.vsix`.
 
 Для разработки удобнее запустить Extension Development Host:
 
@@ -48,6 +57,7 @@ code --extensionDevelopmentPath=$PWD <путь-к-проекту-со-static/ref
 |---|---|
 | Проверка контрактов | `npm run verify:contract` |
 | Сборка бандла | `npm run compile` |
+| Упаковка в `.vsix` | `npm run package` |
 | Unit + conformance | `npm run test:unit` |
 | Интеграционные тесты в VS Code | `npm run test:integration` |
 | Линтер | `npm run lint` |
