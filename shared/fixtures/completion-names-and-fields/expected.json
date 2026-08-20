@@ -1,0 +1,66 @@
+{
+  "description": "Имена сущностей и поля формы в Jinja вместе с негативами completion",
+  "completion": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"form\": \"\"",
+      "anchorOffset": 9,
+      "kind": "name",
+      "items": [
+        "hello_form"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"plain\": \"{{ main_form. }}\"",
+      "anchorOffset": 23,
+      "kind": "field",
+      "items": [
+        "name",
+        "age"
+      ],
+      "absent": [
+        "odd.field"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"typed\": \"{{ main_form.na }}\"",
+      "anchorOffset": 25,
+      "kind": "field",
+      "items": [
+        "name"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"chain\": \"{{ main_form.name. }}\"",
+      "anchorOffset": 29,
+      "items": [],
+      "absent": [
+        "name",
+        "age"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"statement\": \"{% set x = main_form. %}\"",
+      "anchorOffset": 35,
+      "items": [],
+      "absent": [
+        "name",
+        "age"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "default('main_form.')",
+      "anchorOffset": 19,
+      "items": [],
+      "absent": [
+        "name",
+        "age"
+      ]
+    }
+  ]
+}

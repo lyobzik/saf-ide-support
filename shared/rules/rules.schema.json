@@ -1,0 +1,241 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sber.ru/smartapp-dsl/rules.schema.json",
+  "title": "Контракт данных SmartApp DSL",
+  "description": "Снимок Kotlin-таблиц плагина IDEA. Генерируется таском ':idea-plugin:exportRules', вручную не редактируется. Поле _meta.contractVersion описано как const: несовместимое изменение структуры обязано сопровождаться бампом версии в SmartAppContract.VERSION, в этой схеме и в EXPECTED_CONTRACT_VERSION расширения.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "_meta",
+    "kinds",
+    "paths",
+    "refRules",
+    "typeContext",
+    "structuralKeys",
+    "fieldAccess",
+    "jinja"
+  ],
+  "definitions": {
+    "kindName": {
+      "type": "string",
+      "enum": [
+        "SCENARIO",
+        "FORM",
+        "ACTION",
+        "BEHAVIOR",
+        "FILLER",
+        "CLASSIFIER"
+      ]
+    },
+    "nonEmptyStringArray": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "properties": {
+    "_meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generated",
+        "contractVersion",
+        "note"
+      ],
+      "properties": {
+        "generated": {
+          "const": true
+        },
+        "contractVersion": {
+          "const": 2
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "kinds": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "dirName"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/definitions/kindName"
+          },
+          "dirName": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootSegments",
+        "fileExtension",
+        "extensionIgnoreCase"
+      ],
+      "properties": {
+        "rootSegments": {
+          "$ref": "#/definitions/nonEmptyStringArray"
+        },
+        "fileExtension": {
+          "type": "string",
+          "pattern": "^\\."
+        },
+        "extensionIgnoreCase": {
+          "type": "boolean"
+        }
+      }
+    },
+    "refRules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "property",
+          "ownerTypes",
+          "fileKind",
+          "targets"
+        ],
+        "properties": {
+          "property": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ownerTypes": {
+            "description": "null — значение type у владельца не важно",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/definitions/nonEmptyStringArray"
+              }
+            ]
+          },
+          "fileKind": {
+            "description": "null — правило действует в файлах любого вида",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/definitions/kindName"
+              }
+            ]
+          },
+          "targets": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/definitions/kindName"
+            }
+          }
+        }
+      }
+    },
+    "typeContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actionKeys",
+        "actionCategory",
+        "contextKeys",
+        "keyCategories",
+        "insideFieldsCategories",
+        "fileKindCategory"
+      ],
+      "properties": {
+        "actionKeys": {
+          "$ref": "#/definitions/nonEmptyStringArray"
+        },
+        "contextKeys": {
+          "$ref": "#/definitions/nonEmptyStringArray"
+        },
+        "fileKindCategory": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/definitions/kindName"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "actionCategory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "keyCategories": {
+          "description": "Структурный ключ -> категория ключевых слов для его type",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "insideFieldsCategories": {
+          "description": "Переопределение категории для ключей внутри описания поля",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "structuralKeys": {
+      "$ref": "#/definitions/nonEmptyStringArray"
+    },
+    "fieldAccess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formProperty",
+        "fieldsProperty"
+      ],
+      "properties": {
+        "formProperty": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fieldsProperty": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "jinja": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formVariable"
+      ],
+      "properties": {
+        "formVariable": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

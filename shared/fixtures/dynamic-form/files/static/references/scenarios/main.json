@@ -1,0 +1,7 @@
+{
+  "main": {
+    "type": "form_filling",
+    "form": "{{ chosen_form }}",
+    "answer": "{{ main_form.whatever }}"
+  }
+}

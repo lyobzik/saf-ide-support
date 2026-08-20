@@ -1,0 +1,57 @@
+{
+  "description": "Ссылки не утекают в чужой набор static/references",
+  "definitions": [
+    {
+      "file": "app_a/static/references/scenarios/main.json",
+      "anchor": "\"shared_form\"",
+      "anchorOffset": 2,
+      "targets": [
+        {
+          "file": "app_a/static/references/forms/forms.json",
+          "name": "shared_form",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"shared_form\""
+        }
+      ]
+    },
+    {
+      "file": "app_b/static/references/scenarios/main.json",
+      "anchor": "\"shared_form\"",
+      "anchorOffset": 2,
+      "targets": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "app_b/static/references/scenarios/main.json",
+      "items": [
+        {
+          "message": "Не удаётся разрешить form 'shared_form'",
+          "line": 2,
+          "rangeText": "\"shared_form\""
+        }
+      ]
+    }
+  ],
+  "rename": [
+    {
+      "file": "app_a/static/references/forms/forms.json",
+      "anchor": "\"shared_form\"",
+      "anchorOffset": 2,
+      "newName": "renamed_form",
+      "edits": [
+        {
+          "file": "app_a/static/references/forms/forms.json",
+          "line": 1,
+          "rangeText": "shared_form"
+        },
+        {
+          "file": "app_a/static/references/scenarios/main.json",
+          "line": 2,
+          "rangeText": "shared_form"
+        }
+      ]
+    }
+  ]
+}

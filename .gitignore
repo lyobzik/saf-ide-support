@@ -6,6 +6,10 @@ build/
 *.iml
 .idea/
 out/
+node_modules/
+vscode-extension/out/
+*.vsix
+vscode-extension/.vscode-test/
 .DS_Store
 
 # AI-агентские рабочие каталоги окружений (не часть проекта)

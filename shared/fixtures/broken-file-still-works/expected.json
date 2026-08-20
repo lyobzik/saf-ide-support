@@ -1,0 +1,39 @@
+{
+  "description": "Битый файл не индексируется сам, но подсветка и ссылки в нём работают",
+  "definitions": [
+    {
+      "file": "static/references/scenarios/broken.json",
+      "anchor": "\"hello_form\"",
+      "anchorOffset": 2,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "hello_form",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"hello_form\""
+        }
+      ]
+    }
+  ],
+  "semanticTokens": [
+    {
+      "file": "static/references/scenarios/broken.json",
+      "type": "smartappJinjaDelimiter",
+      "texts": [
+        "{{",
+        "}}"
+      ],
+      "lines": [
+        4,
+        4
+      ]
+    }
+  ],
+  "indexedNames": [
+    {
+      "kind": "SCENARIO",
+      "names": []
+    }
+  ]
+}

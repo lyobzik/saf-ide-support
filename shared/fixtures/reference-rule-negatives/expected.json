@@ -1,0 +1,23 @@
+{
+  "description": "action вне external и behavior вне process/save_behavior ссылками не являются",
+  "definitions": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"action\": \"ext_action\"",
+      "anchorOffset": 12,
+      "targets": []
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"behavior\": \"ext_action\"",
+      "anchorOffset": 14,
+      "targets": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "items": []
+    }
+  ]
+}

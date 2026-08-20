@@ -1,0 +1,6 @@
+{
+  // комментарий вне стандарта JSON
+  "commented_form": {
+    "type": "form"
+  }
+}

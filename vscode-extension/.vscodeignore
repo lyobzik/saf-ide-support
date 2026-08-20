@@ -1,0 +1,14 @@
+# В пакет идёт только собранный бандл: исходники, тесты и инструменты сборки
+# пользователю не нужны и лишь раздувают .vsix.
+.vscode-test/**
+.vscode-test.mjs
+src/**
+test/**
+scripts/**
+node_modules/**
+tsconfig*.json
+vitest.config.ts
+.eslintrc.json
+**/*.map
+out/test/**
+**/*.vsix

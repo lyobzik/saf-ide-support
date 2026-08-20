@@ -1,0 +1,53 @@
+{
+  "description": "Две ссылки на одно имя в одной строке различаются колонкой",
+  "references": [
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"twin\"",
+      "anchorOffset": 2,
+      "includeDeclaration": false,
+      "targets": [
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 1,
+          "column": 17,
+          "rangeText": "twin"
+        },
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 1,
+          "column": 40,
+          "rangeText": "twin"
+        }
+      ]
+    }
+  ],
+  "rename": [
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"twin\"",
+      "anchorOffset": 2,
+      "newName": "renamed",
+      "edits": [
+        {
+          "file": "static/references/forms/forms.json",
+          "line": 1,
+          "column": 3,
+          "rangeText": "twin"
+        },
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 1,
+          "column": 17,
+          "rangeText": "twin"
+        },
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 1,
+          "column": 40,
+          "rangeText": "twin"
+        }
+      ]
+    }
+  ]
+}

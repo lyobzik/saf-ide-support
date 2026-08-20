@@ -1,0 +1,17 @@
+{
+  "description": "Динамическая форма не даёт ни ссылки, ни ложного предупреждения",
+  "definitions": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "main_form.whatever",
+      "anchorOffset": 11,
+      "targets": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "items": []
+    }
+  ]
+}

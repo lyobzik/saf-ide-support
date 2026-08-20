@@ -1,0 +1,11 @@
+{
+  "fields_scenario": {
+    "type": "form_filling",
+    "form": "hello_form",
+    "plain": "{{ main_form. }}",
+    "typed": "{{ main_form.na }}",
+    "chain": "{{ main_form.name. }}",
+    "statement": "{% set x = main_form. %}",
+    "in_string": "{{ x | default('main_form.') }}"
+  }
+}

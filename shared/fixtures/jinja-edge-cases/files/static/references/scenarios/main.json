@@ -1,0 +1,13 @@
+{
+  "main": {
+    "type": "form_filling",
+    "form": "hello_form",
+    "escaped": "{{ x | default(\"main_form.name\") }}",
+    "in_array": [
+      "{{ main_form.name }}",
+      "{{ main_form.missing }}"
+    ],
+    "close_in_string": "{{ '}}' }}",
+    "{{ main_form.name }}": "jinja-ключ ссылок не получает"
+  }
+}

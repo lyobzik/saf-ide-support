@@ -1,0 +1,70 @@
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "plugins": [
+    "@typescript-eslint"
+  ],
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "env": {
+    "node": true,
+    "es2022": true
+  },
+  "rules": {
+    "@typescript-eslint/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_"
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/core/**/*.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "vscode",
+                "message": "Ядро не знает о VS Code API: всё, что связано с редактором, живёт в src/vscode/."
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "**/shared/**",
+                  "../../shared/*",
+                  "**/*.schema.json"
+                ],
+                "message": "Контракт читает только src/core/contract.ts — остальные модули берут данные у него."
+              },
+              {
+                "group": [
+                  "node:fs",
+                  "node:path",
+                  "fs",
+                  "path"
+                ],
+                "message": "Ядро не обращается к файловой системе: снимки текста приходят от адаптера."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/core/contract.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ]
+}

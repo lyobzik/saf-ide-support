@@ -1,0 +1,9 @@
+{
+  "main": {
+    "type": "form_filling",
+    "form": "missing_form",
+    "actions": [
+      { "type": "external", "action": "missing_action" }
+    ]
+  }
+}

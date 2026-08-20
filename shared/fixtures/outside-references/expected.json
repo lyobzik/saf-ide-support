@@ -1,0 +1,17 @@
+{
+  "description": "Файл вне static/references/<вид>/ семантики не получает",
+  "definitions": [
+    {
+      "file": "config/scenarios/main.json",
+      "anchor": "\"hello_form\"",
+      "anchorOffset": 2,
+      "targets": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "config/scenarios/main.json",
+      "items": []
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "description": "Плоский main_form.<field> резолвится; цепочки и statement-теги — нет",
+  "definitions": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "main_form.name }}",
+      "anchorOffset": 11,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "name",
+          "ordinal": 0,
+          "line": 4,
+          "rangeText": "\"name\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "main_form.name.extra",
+      "anchorOffset": 11,
+      "targets": []
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "variables.main_form.name",
+      "anchorOffset": 21,
+      "targets": []
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "set x = main_form.age",
+      "anchorOffset": 18,
+      "targets": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "items": [
+        {
+          "message": "Не удаётся разрешить поле 'age' формы 'hello_form'",
+          "line": 5,
+          "rangeText": "age"
+        }
+      ]
+    }
+  ],
+  "semanticTokens": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "type": "smartappJinjaVariable",
+      "texts": [
+        "main_form",
+        "name",
+        "main_form",
+        "age",
+        "main_form",
+        "name",
+        "extra",
+        "variables",
+        "main_form",
+        "name",
+        "set",
+        "x",
+        "main_form",
+        "age"
+      ],
+      "lines": [
+        4,
+        4,
+        5,
+        5,
+        6,
+        6,
+        6,
+        7,
+        7,
+        7,
+        8,
+        8,
+        8,
+        8
+      ]
+    }
+  ]
+}

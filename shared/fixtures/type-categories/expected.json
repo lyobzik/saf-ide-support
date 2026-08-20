@@ -1,0 +1,86 @@
+{
+  "description": "Категория ключевых слов type определяется контекстом, а не видом файла",
+  "completion": [
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"type\": \"question\"",
+      "anchorOffset": 9,
+      "kind": "keyword",
+      "items": [
+        "composite",
+        "integration",
+        "question"
+      ],
+      "absent": [
+        "external",
+        "form_filling"
+      ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"type\": \"value_in_set\"",
+      "anchorOffset": 9,
+      "kind": "keyword",
+      "items": [
+        "value_in_set"
+      ],
+      "absent": [
+        "form_filling",
+        "app_type"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"type\": \"app_type\"",
+      "anchorOffset": 9,
+      "kind": "keyword",
+      "items": [
+        "app_type"
+      ],
+      "absent": [
+        "question",
+        "value_in_set"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"type\": \"external\"",
+      "anchorOffset": 9,
+      "kind": "keyword",
+      "items": [
+        "external"
+      ],
+      "absent": [
+        "question"
+      ]
+    }
+  ],
+  "semanticTokens": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "type": "smartappKeyword",
+      "texts": [
+        "\"form_filling\"",
+        "\"app_type\"",
+        "\"external\""
+      ],
+      "lines": [
+        2,
+        4,
+        8
+      ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "type": "smartappKeyword",
+      "texts": [
+        "\"question\"",
+        "\"value_in_set\""
+      ],
+      "lines": [
+        5,
+        7
+      ]
+    }
+  ]
+}

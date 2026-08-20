@@ -1,0 +1,13 @@
+{
+  "description": "Комментарии и висячие запятые индексируются, битый JSON и мусор — нет",
+  "indexedNames": [
+    {
+      "kind": "FORM",
+      "names": [
+        "valid_form",
+        "commented_form",
+        "trailing_comma_form"
+      ]
+    }
+  ]
+}

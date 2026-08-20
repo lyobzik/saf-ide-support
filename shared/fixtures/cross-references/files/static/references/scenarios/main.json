@@ -1,0 +1,17 @@
+{
+  "main": {
+    "type": "form_filling",
+    "form": "hello_form",
+    "actions": [
+      { "type": "run_scenario", "scenario": "other" },
+      { "type": "external", "action": "ext_action" },
+      { "type": "external", "filler": "my_filler" },
+      { "type": "external", "classifier": "my_classifier" },
+      { "type": "process_behavior", "behavior": "my_behavior" }
+    ]
+  },
+  "other": {
+    "type": "base",
+    "scenario_description": "main"
+  }
+}

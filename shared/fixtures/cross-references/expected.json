@@ -1,0 +1,109 @@
+{
+  "description": "Ссылочные правила для form, scenario, action, filler, classifier, behavior",
+  "definitions": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"hello_form\"",
+      "anchorOffset": 2,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "hello_form",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"hello_form\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"scenario\": \"other\"",
+      "anchorOffset": 14,
+      "targets": [
+        {
+          "file": "static/references/scenarios/main.json",
+          "name": "other",
+          "ordinal": 0,
+          "line": 12,
+          "rangeText": "\"other\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"action\": \"ext_action\"",
+      "anchorOffset": 12,
+      "targets": [
+        {
+          "file": "static/references/actions/actions.json",
+          "name": "ext_action",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"ext_action\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"filler\": \"my_filler\"",
+      "anchorOffset": 12,
+      "targets": [
+        {
+          "file": "static/references/field_fillers/fillers.json",
+          "name": "my_filler",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"my_filler\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"classifier\": \"my_classifier\"",
+      "anchorOffset": 16,
+      "targets": [
+        {
+          "file": "static/references/classifiers/classifiers.json",
+          "name": "my_classifier",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"my_classifier\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"behavior\": \"my_behavior\"",
+      "anchorOffset": 14,
+      "targets": [
+        {
+          "file": "static/references/behaviors/behaviors.json",
+          "name": "my_behavior",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"my_behavior\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"scenario_description\": \"main\"",
+      "anchorOffset": 26,
+      "targets": [
+        {
+          "file": "static/references/scenarios/main.json",
+          "name": "main",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"main\""
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "items": []
+    }
+  ]
+}

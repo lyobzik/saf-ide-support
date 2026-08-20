@@ -1,0 +1,114 @@
+# CI монорепозитория SmartApp DSL.
+#
+# Две реализации (плагин IDEA и расширение VS Code) держатся вместе двумя
+# контрактами: данными (`shared/rules`, `shared/keywords`) и поведением
+# (`shared/fixtures`). Стадия `contract` проверяет первый, стадия `test` — второй,
+# прогоняя один и тот же корпус на обеих сторонах.
+#
+# Обязательность пайплайна включается в настройках проекта
+# (Settings → Merge requests → «Pipelines must succeed» плюс защита ветки master),
+# а не в этом файле.
+
+stages:
+  - contract
+  - test
+
+variables:
+  GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+  # Локальной IDE на runner'е нет: платформа берётся из maven-репозиториев.
+  GRADLE_ARGS: "-PideSource=maven"
+
+default:
+  interruptible: true
+
+.gradle:
+  image: eclipse-temurin:21-jdk
+  cache:
+    key: gradle
+    paths:
+      - .gradle/caches
+      - .gradle/wrapper
+
+.node:
+  image: node:22-bookworm
+  cache:
+    key:
+      files:
+        - vscode-extension/package-lock.json
+    paths:
+      - vscode-extension/node_modules
+  before_script:
+    - cd vscode-extension
+    - npm ci
+
+# --- contract ---------------------------------------------------------------
+
+contract:rules:
+  extends: .gradle
+  stage: contract
+  script:
+    # Снимок контракта обязан совпадать с Kotlin-таблицами, из которых он растёт.
+    - ./gradlew $GRADLE_ARGS :idea-plugin:exportRules --check
+
+contract:keywords:
+  image: python:3.12-slim
+  stage: contract
+  script:
+    # Словарь обязан соответствовать vendored-исходнику фреймворка.
+    - python tools/generate_keywords.py --check
+
+contract:schema:
+  extends: .node
+  stage: contract
+  script:
+    # Единственная schema-проверка в проекте: оба общих артефакта плюс версия.
+    - npm run verify:contract
+
+# --- test -------------------------------------------------------------------
+
+test:idea:
+  extends: .gradle
+  stage: test
+  script:
+    - ./gradlew $GRADLE_ARGS -Djava.awt.headless=true :idea-plugin:test
+  artifacts:
+    when: always
+    reports:
+      junit: idea-plugin/build/test-results/test/TEST-*.xml
+    expire_in: 1 week
+
+test:idea:verify:
+  extends: .gradle
+  stage: test
+  script:
+    # Верификатор JetBrains ловит то, чего не видят тесты: невалидный дескриптор
+    # и несовместимость с версиями платформы. Без этой job'ы регрессия в
+    # plugin.xml дойдёт до master.
+    - ./gradlew $GRADLE_ARGS -Djava.awt.headless=true :idea-plugin:verifyPlugin
+  artifacts:
+    when: on_failure
+    paths:
+      - idea-plugin/build/reports/pluginVerifier/
+    expire_in: 1 week
+
+test:vscode:unit:
+  extends: .node
+  stage: test
+  script:
+    # Ядро, адаптер (на фейковом vscode) и conformance-корпус.
+    - npm run test:unit
+
+test:vscode:integration:
+  extends: .node
+  stage: test
+  before_script:
+    - apt-get update
+    - >-
+      apt-get install -y --no-install-recommends
+      xvfb libnss3 libgbm1 libasound2 libgtk-3-0 libx11-xcb1 libxss1 libsecret-1-0
+    - cd vscode-extension
+    - npm ci
+  script:
+    # Настоящий VS Code: регистрация провайдеров и активация расширения.
+    - xvfb-run -a npm run test:integration

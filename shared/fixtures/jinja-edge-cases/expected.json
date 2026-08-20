@@ -1,0 +1,63 @@
+{
+  "description": "JSON-escape, строки Jinja, элементы массива и Jinja в ключе",
+  "definitions": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"{{ main_form.name }}\",",
+      "anchorOffset": 14,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "name",
+          "ordinal": 0,
+          "line": 4,
+          "rangeText": "\"name\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"{{ main_form.name }}\": ",
+      "anchorOffset": 14,
+      "targets": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "items": [
+        {
+          "message": "Не удаётся разрешить поле 'missing' формы 'hello_form'",
+          "line": 7,
+          "rangeText": "missing"
+        }
+      ]
+    }
+  ],
+  "semanticTokens": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "type": "smartappJinjaString",
+      "texts": [
+        "\\\"main_form.name\\\"",
+        "'}}'"
+      ],
+      "lines": [
+        4,
+        9
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "type": "smartappJinjaFilter",
+      "texts": [
+        "|",
+        "default"
+      ],
+      "lines": [
+        4,
+        4
+      ]
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "description": "Find Usages и переименование для сущности и для поля формы",
+  "references": [
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"hello_form\"",
+      "anchorOffset": 2,
+      "includeDeclaration": false,
+      "targets": [
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 3,
+          "rangeText": "hello_form"
+        }
+      ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"name\"",
+      "anchorOffset": 2,
+      "includeDeclaration": false,
+      "targets": [
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 4,
+          "rangeText": "name"
+        }
+      ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"hello_form\"",
+      "anchorOffset": 2,
+      "includeDeclaration": true,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "line": 1,
+          "rangeText": "\"hello_form\""
+        },
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 3,
+          "rangeText": "hello_form"
+        }
+      ]
+    }
+  ],
+  "rename": [
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"hello_form\"",
+      "anchorOffset": 2,
+      "newName": "greeting_form",
+      "edits": [
+        {
+          "file": "static/references/forms/forms.json",
+          "line": 1,
+          "rangeText": "hello_form"
+        },
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 3,
+          "rangeText": "hello_form"
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "main_form.name",
+      "anchorOffset": 11,
+      "newName": "title",
+      "edits": [
+        {
+          "file": "static/references/forms/forms.json",
+          "line": 4,
+          "rangeText": "name"
+        },
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 4,
+          "rangeText": "name"
+        }
+      ]
+    }
+  ]
+}

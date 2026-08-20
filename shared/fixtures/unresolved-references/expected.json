@@ -1,0 +1,28 @@
+{
+  "description": "Неразрешённые ссылки дают предупреждения с текстами как в IDEA",
+  "diagnostics": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "items": [
+        {
+          "message": "Не удаётся разрешить form 'missing_form'",
+          "line": 3,
+          "rangeText": "\"missing_form\""
+        },
+        {
+          "message": "Не удаётся разрешить action/behavior 'missing_action'",
+          "line": 5,
+          "rangeText": "\"missing_action\""
+        }
+      ]
+    }
+  ],
+  "definitions": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"missing_form\"",
+      "anchorOffset": 2,
+      "targets": []
+    }
+  ]
+}

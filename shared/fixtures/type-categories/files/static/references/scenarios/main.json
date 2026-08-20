@@ -1,0 +1,13 @@
+{
+  "cat_scenario": {
+    "type": "form_filling",
+    "requirement": {
+      "type": "app_type"
+    },
+    "on_filled_actions": [
+      {
+        "type": "external"
+      }
+    ]
+  }
+}

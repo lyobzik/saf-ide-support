@@ -1,0 +1,11 @@
+{
+  "main_scenario": {
+    "type": "form_filling",
+    "form": "hello_form",
+    "answer": "{{ main_form.name }}"
+  },
+  "broken_scenario": {
+    "type": "form_filling",
+    "form": "missing_form"
+  }
+}

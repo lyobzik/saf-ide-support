@@ -1,0 +1,9 @@
+{
+  "main": {
+    "type": "form_filling",
+    "action": "ext_action",
+    "questions": [
+      { "type": "sdk_answer", "behavior": "ext_action" }
+    ]
+  }
+}

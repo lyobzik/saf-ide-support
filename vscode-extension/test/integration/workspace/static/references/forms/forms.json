@@ -1,0 +1,10 @@
+{
+  "hello_form": {
+    "type": "base",
+    "fields": {
+      "name": {
+        "type": "question"
+      }
+    }
+  }
+}

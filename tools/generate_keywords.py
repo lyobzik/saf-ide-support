@@ -38,9 +38,7 @@ DICT_TO_CATEGORY = {
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_SRC = os.path.join(HERE, "vendor", "resources__init__.py")
-DEFAULT_OUT = os.path.join(
-    HERE, "..", "src", "main", "resources", "keywords", "keywords.json"
-)
+DEFAULT_OUT = os.path.join(HERE, "..", "shared", "keywords", "keywords.json")
 
 
 def _subscript_base_name(target):
@@ -136,6 +134,8 @@ def main(argv=None):
                         help="path to smart_kit/resources/__init__.py")
     parser.add_argument("-o", "--out", default=DEFAULT_OUT,
                         help="output keywords.json path")
+    parser.add_argument("--check", action="store_true",
+                        help="verify the committed file instead of rewriting it")
     args = parser.parse_args(argv)
 
     with open(args.source, "rb") as fh:
@@ -164,18 +164,37 @@ def main(argv=None):
         "categories": categories,
     }
 
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+    # Пустой словарь означает, что AST-разбор источника развалился: молча писать
+    # такой файл нельзя — он отключил бы подсветку в обеих IDE.
+    if total_unique == 0:
+        print("ERROR: no keywords found — check the source/AST shape", file=sys.stderr)
+        return 1
+
+    if args.check:
+        try:
+            with open(args.out, encoding="utf-8") as fh:
+                actual = fh.read()
+        except FileNotFoundError:
+            print("keywords snapshot is missing:", args.out, file=sys.stderr)
+            return 1
+        if actual != rendered:
+            print("keywords snapshot is stale:", args.out, file=sys.stderr)
+            print("Run 'python tools/generate_keywords.py' and commit the result.",
+                  file=sys.stderr)
+            return 1
+        print("keywords snapshot is up to date:", args.out)
+        return 0
+
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False, indent=2)
-        fh.write("\n")
+        fh.write(rendered)
 
     print("wrote", args.out)
     for cat in sorted(counts):
         print("  {:18s} {}".format(cat, counts[cat]))
     print("  total unique:", total_unique)
-    if total_unique == 0:
-        print("WARNING: no keywords found — check the source/AST shape", file=sys.stderr)
-        return 1
     return 0
 
 

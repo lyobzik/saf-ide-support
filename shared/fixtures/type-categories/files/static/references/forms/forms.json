@@ -1,0 +1,13 @@
+{
+  "cat_form": {
+    "type": "form",
+    "fields": {
+      "x": {
+        "type": "question",
+        "requirement": {
+          "type": "value_in_set"
+        }
+      }
+    }
+  }
+}

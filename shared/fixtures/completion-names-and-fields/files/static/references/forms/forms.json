@@ -1,0 +1,16 @@
+{
+  "hello_form": {
+    "type": "form",
+    "fields": {
+      "name": {
+        "type": "integration"
+      },
+      "age": {
+        "type": "question"
+      },
+      "odd.field": {
+        "type": "question"
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "description": "Одноимённые top-level ключи дают два различимых определения",
+  "definitions": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"dup_form\"",
+      "anchorOffset": 2,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "dup_form",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"dup_form\""
+        },
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "dup_form",
+          "ordinal": 1,
+          "line": 4,
+          "rangeText": "\"dup_form\""
+        }
+      ]
+    }
+  ],
+  "indexedNames": [
+    {
+      "kind": "FORM",
+      "names": [
+        "dup_form"
+      ]
+    }
+  ]
+}
