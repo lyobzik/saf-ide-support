@@ -15,8 +15,19 @@ import Ajv from "ajv";
 const here = dirname(fileURLToPath(import.meta.url));
 const sharedDir = join(here, "..", "..", "shared");
 
-/** Ожидаемая версия контракта; обязана совпадать с SmartAppContract.VERSION. */
-const EXPECTED_CONTRACT_VERSION = 2;
+/**
+ * Ожидаемая версия контракта читается из `src/core/contract.ts`, а не дублируется
+ * здесь: бампов версии и без того три (Kotlin, схема, TS), и четвёртое место
+ * ломало сборку уже после того, как остальные три были синхронизированы.
+ */
+const contractSource = readFileSync(join(here, "..", "src", "core", "contract.ts"), "utf8");
+const versionMatch = /EXPECTED_CONTRACT_VERSION\s*=\s*(\d+)/.exec(contractSource);
+if (versionMatch === null) {
+  console.error("Contract verification failed:");
+  console.error("  не удалось прочитать EXPECTED_CONTRACT_VERSION из src/core/contract.ts");
+  process.exit(1);
+}
+const EXPECTED_CONTRACT_VERSION = Number(versionMatch[1]);
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 

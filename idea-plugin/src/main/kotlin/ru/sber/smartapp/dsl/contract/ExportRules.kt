@@ -56,6 +56,7 @@ object ExportRules {
         root.add("kinds", kinds())
         root.add("paths", paths())
         root.add("refRules", refRules())
+        root.add("fileRefRules", fileRefRules())
         root.add("typeContext", typeContext())
         root.add("structuralKeys", strings(SmartAppSpecs.structuralKeys))
         root.add("fieldAccess", fieldAccess())
@@ -107,7 +108,20 @@ object ExportRules {
         }
     }
 
+    private fun fileRefRules(): JsonArray = JsonArray().apply {
+        for (rule in SmartAppSpecs.fileRefRules) {
+            add(
+                JsonObject().apply {
+                    addProperty("property", rule.property)
+                    add("ownerTypes", rule.ownerTypes?.let { strings(it) } ?: JsonNull.INSTANCE)
+                    add("searchDirs", strings(rule.searchDirs))
+                },
+            )
+        }
+    }
+
     private fun typeContext(): JsonObject = JsonObject().apply {
+        addProperty("typeProperty", TypeContextSpec.typeProperty)
         add("actionKeys", strings(TypeContextSpec.actionKeys))
         addProperty("actionCategory", TypeContextSpec.actionCategory)
         add("contextKeys", strings(TypeContextSpec.contextKeys))

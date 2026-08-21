@@ -6,6 +6,7 @@ import com.intellij.json.psi.JsonStringLiteral
 import ru.sber.smartapp.dsl.SmartAppFiles
 import ru.sber.smartapp.dsl.SmartAppRefKind
 import ru.sber.smartapp.dsl.contract.SmartAppSpecs
+import ru.sber.smartapp.dsl.contract.TypeContextSpec
 
 /**
  * Применяет замороженную таблицу кросс-ссылок [SmartAppSpecs.refRules] к PSI:
@@ -44,7 +45,7 @@ object SmartAppRefRules {
     fun isReference(literal: JsonStringLiteral): Boolean = targetKinds(literal).isNotEmpty()
 
     private fun ownerType(owner: JsonObject): String? {
-        val typeValue = owner.findProperty("type")?.value as? JsonStringLiteral
+        val typeValue = owner.findProperty(TypeContextSpec.typeProperty)?.value as? JsonStringLiteral
         return typeValue?.value
     }
 }

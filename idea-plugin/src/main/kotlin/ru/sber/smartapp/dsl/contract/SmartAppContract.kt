@@ -27,7 +27,7 @@ object SmartAppContract {
      * (там версия описана как `const`) и `EXPECTED_CONTRACT_VERSION` в
      * TS-расширении — иначе проверки падают.
      */
-    const val VERSION: Int = 2
+    const val VERSION: Int = 4
 }
 
 /** Вид сущности и подкаталог `static/references/<dirName>/`, в котором он живёт. */
@@ -46,6 +46,23 @@ data class RuleSpec(
     val ownerTypes: Set<String>?,
     val fileKind: SmartAppRefKind?,
     val targets: List<SmartAppRefKind>,
+)
+
+/**
+ * Правило ссылки **на файл**: значение свойства [property] называет файл,
+ * который лежит в одном из каталогов [searchDirs] внутри набора `references`.
+ *
+ * Отдельный вид правила, а не [RuleSpec]: там цель — top-level ключ JSON,
+ * найденный по индексу определений, здесь — файл целиком, найденный по пути.
+ *
+ * [ownerTypes] — допустимые значения `type` у объекта-владельца (`null` —
+ * владелец не важен). [searchDirs] просматриваются по порядку, побеждает первый
+ * каталог, в котором файл нашёлся.
+ */
+data class FileRefSpec(
+    val property: String,
+    val ownerTypes: Set<String>?,
+    val searchDirs: List<String>,
 )
 
 /** Раскладка DSL-файлов на диске. */
@@ -75,6 +92,13 @@ object JinjaSpec {
 
 /** Данные для определения категории ключевых слов по контексту свойства `type`. */
 object TypeContextSpec {
+
+    /**
+     * Свойство, значение которого несёт «ключевое слово» DSL. По нему же
+     * определяется тип объекта-владельца в ссылочных правилах, поэтому строкой
+     * в коде оно стоять не должно.
+     */
+    val typeProperty: String = "type"
 
     /**
      * Ключи-контейнеры action-объектов: их `type` принадлежит категории `action`,
@@ -182,6 +206,26 @@ object SmartAppSpecs {
             ownerTypes = setOf("process_behavior", "save_behavior"),
             fileKind = null,
             targets = listOf(SmartAppRefKind.BEHAVIOR),
+        ),
+    )
+
+    /**
+     * Замороженная таблица файловых ссылок.
+     *
+     * Происхождение правила: в публичных исходниках `smart_app_framework` ключа
+     * `file` нет вовсе (проверено grep'ом по всем `*.py` репозитория
+     * sberdevices/smart_app_framework — ни `"file"`, ни `FileSystemLoader`).
+     * Правило выведено из раскладки эталонного приложения: значение
+     * `"experience_items_template.jinja2"` при `"type": "unified_template"`
+     * указывает на файл `static/references/templates/experience_items_template.jinja2`.
+     * Значение содержит имя файла **вместе с расширением** — расширение
+     * контрактом не подставляется.
+     */
+    val fileRefRules: List<FileRefSpec> = listOf(
+        FileRefSpec(
+            property = "file",
+            ownerTypes = setOf("unified_template"),
+            searchDirs = listOf("templates"),
         ),
     )
 

@@ -1,4 +1,5 @@
 import { findNodeAtOffset, parseTree, type Node, type ParseError } from "jsonc-parser";
+import { typeContext } from "./contract";
 
 /**
  * Тонкие обёртки над `jsonc-parser` — замена PSI-навигации из плагина IDEA.
@@ -56,7 +57,7 @@ export function ownerObject(property: Node): Node | undefined {
 export function ownerType(object: Node): string | undefined {
   for (const property of object.children ?? []) {
     if (property.type !== "property") continue;
-    if (propertyName(property) !== "type") continue;
+    if (propertyName(property) !== typeContext.typeProperty) continue;
     const value = propertyValue(property);
     return value?.type === "string" ? (value.value as string) : undefined;
   }

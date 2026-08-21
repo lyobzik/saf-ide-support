@@ -1,3 +1,4 @@
+import { typeContext } from "./contract";
 import { propertyName, propertyValue, propertyOf, type Node } from "./ast";
 import { isJinja } from "./jinja";
 import { decode, rawText } from "./jsonDecode";
@@ -65,7 +66,7 @@ export function semanticTokens(context: DocumentContext): SemanticToken[] {
     const property = propertyOf(node);
     if (property === undefined || propertyValue(property) !== node) return;
     const category = keywordCategoryAt(node, context.kind);
-    if (propertyName(property) !== "type") return;
+    if (propertyName(property) !== typeContext.typeProperty) return;
     if (!isKeywordInContext(value, category)) return;
 
     // Диапазон вместе с кавычками — как textRange литерала в IDEA.

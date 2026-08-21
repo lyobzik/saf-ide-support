@@ -16,7 +16,7 @@ import keywordsJson from "../../../shared/keywords/keywords.json";
  */
 
 /** Версия контракта, с которой умеет работать расширение. */
-export const EXPECTED_CONTRACT_VERSION = 2;
+export const EXPECTED_CONTRACT_VERSION = 4;
 
 /** Имя вида сущности, как оно записано в контракте. */
 export type RefKind = string;
@@ -35,6 +35,19 @@ export interface RefRule {
   readonly targets: readonly RefKind[];
 }
 
+/**
+ * Правило ссылки на файл: значение свойства называет файл в одном из каталогов
+ * набора `references`. Отдельный вид правила, а не [RefRule]: цель — файл
+ * целиком, найденный по пути, а не top-level ключ из индекса.
+ */
+export interface FileRefRule {
+  readonly property: string;
+  /** `null` — значение `type` у владельца не важно. */
+  readonly ownerTypes: readonly string[] | null;
+  /** Каталоги набора `references`, просматриваются по порядку. */
+  readonly searchDirs: readonly string[];
+}
+
 export interface PathSpec {
   readonly rootSegments: readonly string[];
   readonly fileExtension: string;
@@ -42,6 +55,8 @@ export interface PathSpec {
 }
 
 export interface TypeContextSpec {
+  /** Свойство, чьё значение — ключевое слово DSL и тип объекта-владельца. */
+  readonly typeProperty: string;
   readonly actionKeys: ReadonlySet<string>;
   /** Категория для любого ключа из actionKeys. */
   readonly actionCategory: string;
@@ -109,7 +124,11 @@ if (paths.rootSegments.length === 0) fail("path root segments are empty");
 export const refRules: readonly RefRule[] = rulesJson.refRules;
 if (refRules.length === 0) fail("reference rule table is empty");
 
+export const fileRefRules: readonly FileRefRule[] = rulesJson.fileRefRules;
+if (fileRefRules.length === 0) fail("file reference rule table is empty");
+
 export const typeContext: TypeContextSpec = {
+  typeProperty: rulesJson.typeContext.typeProperty,
   actionKeys: new Set(rulesJson.typeContext.actionKeys),
   actionCategory: rulesJson.typeContext.actionCategory,
   contextKeys: new Set(rulesJson.typeContext.contextKeys),
