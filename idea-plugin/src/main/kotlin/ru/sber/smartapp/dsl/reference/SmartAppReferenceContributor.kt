@@ -17,8 +17,10 @@ import ru.sber.smartapp.dsl.reference.JsonStringLiteralDecoder.rawText
  *  - [SmartAppReference] — обычные кросс-ссылки (значения свойств `form`,
  *    `scenario`, `filler`, …);
  *  - [SmartAppFieldReference] — семантические ссылки на поля формы внутри
- *    интерполяции `{{ main_form.<field> }}` (statement-теги `{% … %}` ссылок не
- *    порождают — только подсветка).
+ *    выражений Jinja: и в интерполяциях `{{ … }}`, и в statement-тегах
+ *    `{% … %}`;
+ *  - [SmartAppFormVariableReference] — ссылка с самой переменной `main_form`
+ *    на определение целевой формы.
  *
  * Семантические ссылки создаются только для **значений** свойств (не для
  * JSON-ключей): `"value": "{{ main_form.name }}"` резолвится, а
@@ -42,6 +44,10 @@ class SmartAppReferenceContributor : PsiReferenceContributor() {
 
                     // Сначала — обычная ссылочная позиция (без Jinja).
                     if (!isJinja(literal.value)) {
+                        // Ссылка на файл шаблона: цель — файл, а не имя сущности.
+                        if (SmartAppFileRefRules.isFileReference(literal)) {
+                            return arrayOf(SmartAppFileReference(literal))
+                        }
                         if (!SmartAppRefRules.isReference(literal)) return PsiReference.EMPTY_ARRAY
                         return arrayOf(SmartAppReference(literal))
                     }
@@ -54,11 +60,14 @@ class SmartAppReferenceContributor : PsiReferenceContributor() {
     }
 
     /**
-     * Навешивает [SmartAppFieldReference] на каждое вхождение `main_form.<id>`
-     * внутри интерполяций `{{ … }}`. Целевая форма — из
-     * [SmartAppFieldRef.targetFormOf]; если неизвестна (динамический `form`) —
-     * ссылка не создаётся (нет ложного WARNING). Диапазон ссылки — только на
-     * имя поля, в координатах элемента (decoded→raw→absolute).
+     * Навешивает [SmartAppFormVariableReference] на каждое вхождение
+     * `main_form` и [SmartAppFieldReference] — на каждое `main_form.<id>`
+     * внутри выражений Jinja (и `{{ … }}`, и `{% … %}`).
+     *
+     * Целевая форма — из [SmartAppFieldRef.targetFormOf]; если неизвестна
+     * (динамический `form`) — ссылки не создаются (нет ложного WARNING).
+     * Диапазон ссылки на поле — только имя поля, в координатах элемента
+     * (decoded→raw→absolute).
      */
     private fun fieldReferences(literal: JsonStringLiteral): Array<PsiReference> {
         val form = SmartAppFieldRef.targetFormOf(literal) ?: return PsiReference.EMPTY_ARRAY
@@ -66,14 +75,22 @@ class SmartAppReferenceContributor : PsiReferenceContributor() {
         val decoded = JsonStringLiteralDecoder.decode(raw)
 
         val refs = ArrayList<PsiReference>()
+        // Сама переменная `main_form` — тоже ссылка: на определение целевой формы.
+        for (range in SmartAppJinjaLexer.formVariableRanges(decoded.text)) {
+            refs.add(SmartAppFormVariableReference(literal, elementRange(decoded, range), form))
+        }
         for (candidate in SmartAppJinjaLexer.fieldCandidates(decoded.text)) {
-            val rawStart = decoded.decodedToRaw[candidate.fieldRange.startOffset]
-            val rawEnd = decoded.decodedToRaw[candidate.fieldRange.endOffset]
-            // В координатах элемента: +1 за открывающую JSON-кавычку.
-            val rangeInElement = TextRange(rawStart + 1, rawEnd + 1)
+            val rangeInElement = elementRange(decoded, candidate.fieldRange)
             refs.add(SmartAppFieldReference(literal, rangeInElement, FormFieldRef(form, candidate.field)))
         }
         return if (refs.isEmpty()) PsiReference.EMPTY_ARRAY else refs.toTypedArray()
+    }
+
+    /** Диапазон из decoded-координат в координаты элемента (+1 за кавычку). */
+    private fun elementRange(decoded: JsonStringLiteralDecoder.Decoded, range: TextRange): TextRange {
+        val rawStart = decoded.decodedToRaw[range.startOffset]
+        val rawEnd = decoded.decodedToRaw[range.endOffset]
+        return TextRange(rawStart + 1, rawEnd + 1)
     }
 
     companion object {

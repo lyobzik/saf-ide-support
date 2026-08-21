@@ -26,7 +26,7 @@ enum class SmartAppJinjaTokenType {
     /** `}}` — закрывающий разделитель интерполяции. */
     INTERP_CLOSE,
 
-    /** `{%` — открывающий разделитель statement-тега (только подсветка). */
+    /** `{%` — открывающий разделитель statement-тега. */
     STATEMENT_OPEN,
 
     /** `%}` — закрывающий разделитель statement-тега. */
@@ -55,7 +55,7 @@ enum class SmartAppJinjaTokenType {
 data class SmartAppJinjaToken(val type: SmartAppJinjaTokenType, val range: TextRange)
 
 /**
- * Кандидат на семантическую ссылку `main_form.<field>` внутри интерполяции.
+ * Кандидат на семантическую ссылку `main_form.<field>` внутри выражения Jinja.
  * [fieldRange] — диапазон имени поля в decoded-координатах литерала.
  */
 data class SmartAppFieldCandidate(val form: String, val field: String, val fieldRange: TextRange)
@@ -64,8 +64,8 @@ data class SmartAppFieldCandidate(val form: String, val field: String, val field
  * Детерминированный лексер Jinja-фрагментов внутри строкового JSON-литерала.
  *
  * **Не полноценный Jinja-парсер**, а токенизатор для двух целей:
- * 1. Найти семантические ссылки `main_form.<id>` — только внутри интерполяции
- *    `{{ … }}` (statement-теги `{% … %}` подсвечиваются, но ссылок не порождают).
+ * 1. Найти семантические ссылки `main_form.<id>` внутри выражений — как в
+ *    интерполяциях `{{ … }}`, так и в statement-тегах `{% … %}`.
  * 2. Разметить токены для подсветки.
  *
  * Контракт:
@@ -77,7 +77,8 @@ data class SmartAppFieldCandidate(val form: String, val field: String, val field
  * - несколько фрагментов обрабатываются независимо;
  * - внутри выражения идентификаторы внутри [SmartAppJinjaTokenType.STRING]
  *   **не** токенизируются (`{{ "main_form.name" }}` → один STRING);
- * - `{% … %}` — **только лексическая подсветка**, без семантических ссылок;
+ * - разделители `{% … %}` и `{{ … }}` различаются типом токена, но семантика
+ *   полей работает в обоих;
  * - после `|` идентификатор помечается [SmartAppJinjaTokenType.FILTER_NAME].
  *
  * Все смещения — относительно [decodedText], переданного в [tokenize]. Перевод в
@@ -115,25 +116,52 @@ object SmartAppJinjaLexer {
     }
 
     /**
-     * Находит семантические кандидаты `main_form.<id>` внутри интерполяций
-     * `{{ … }}` (statement-теги `{% … %}` исключены). Допускает whitespace между
-     * `main_form`, `.` и именем поля. Цепочки не разбираются: `main_form` в
-     * позиции чужого поля (`variables.main_form.x`) и подобъекты
-     * (`main_form.x.y`) кандидатов не дают. Возвращает кандидаты в порядке встречи.
+     * Находит семантические кандидаты `main_form.<id>` внутри выражений Jinja —
+     * и интерполяций `{{ … }}`, и statement-тегов `{% … %}`: в бою обращение к
+     * полю одинаково часто стоит в `{% if main_form.x %}`.
+     *
+     * Допускает whitespace между `main_form`, `.` и именем поля. Кандидатом
+     * становится **первый** сегмент: `main_form.a.b` даёт `a` (хвост цепочки
+     * семантики не получает — у значений полей нет схемы). Левая граница
+     * сохраняется: `main_form` в позиции чужого поля (`variables.main_form.x`)
+     * кандидата не даёт. Кандидаты возвращаются в порядке встречи.
      */
     fun fieldCandidates(decodedText: String): List<SmartAppFieldCandidate> {
         val tokens = tokenize(decodedText)
+        val result = ArrayList<SmartAppFieldCandidate>()
         var i = 0
         while (i < tokens.size) {
-            val t = tokens[i]
-            if (t.type == INTERP_OPEN) {
-                // Ищем внутри этой интерполяции последовательность VAR(main_form)
-                // DOT VAR(field), допуская TEXT (whitespace) между ними.
-                return collectFromInterp(decodedText, tokens, i)
+            val type = tokens[i].type
+            if (type != INTERP_OPEN && type != STATEMENT_OPEN) {
+                i++
+                continue
             }
-            i++
+            i = collectFromExpr(decodedText, tokens, i, result)
         }
-        return emptyList()
+        return result
+    }
+
+    /**
+     * Диапазоны вхождений переменной формы (`main_form`) внутри выражений Jinja.
+     *
+     * Левая граница та же, что у [fieldCandidates]: `variables.main_form` — это
+     * обращение к чужому полю, вхождением переменной формы оно не считается.
+     * В отличие от кандидатов, следующая за переменной точка не обязательна:
+     * `{{ main_form }}` тоже указывает на форму.
+     */
+    fun formVariableRanges(decodedText: String): List<TextRange> {
+        val tokens = tokenize(decodedText)
+        val result = ArrayList<TextRange>()
+        for (i in tokens.indices) {
+            val t = tokens[i]
+            if (t.type != VAR) continue
+            val text = decodedText.substring(t.range.startOffset, t.range.endOffset)
+            if (text != JinjaSpec.formVariable) continue
+            val prev = neighborSkippingWhitespace(decodedText, tokens, i - 1, -1)
+            if (prev != null && prev.type == DOT) continue
+            result.add(t.range)
+        }
+        return result
     }
 
     /** Токенизирует тело выражения — диапазон (from, until) без разделителей. */
@@ -204,25 +232,24 @@ object SmartAppJinjaLexer {
     }
 
     /**
-     * Собирает кандидатов из одной интерполяции, начатой токеном [interpStartIdx]
-     * (INTERP_OPEN). Допускает несколько вхождений `main_form.<field>` в одном
-     * выражении и несколько интерполяций в литерале.
+     * Собирает кандидатов из одного выражения, начатого токеном [openIdx]
+     * (`{{` или `{%`). Возвращает индекс, с которого продолжать обход: одно
+     * выражение может содержать несколько вхождений `main_form.<field>`, а
+     * литерал — несколько выражений.
      */
-    private fun collectFromInterp(
+    private fun collectFromExpr(
         text: String,
         tokens: List<SmartAppJinjaToken>,
-        interpStartIdx: Int,
-    ): List<SmartAppFieldCandidate> {
-        val result = ArrayList<SmartAppFieldCandidate>()
-        var j = interpStartIdx + 1
+        openIdx: Int,
+        result: MutableList<SmartAppFieldCandidate>,
+    ): Int {
+        var j = openIdx + 1
         while (j < tokens.size) {
             val t = tokens[j]
-            if (t.type == INTERP_CLOSE) break
-            if (t.type == STATEMENT_OPEN) {
-                // Вложенные statement-теги теоретически невозможны внутри {{ }},
-                // но защитно пропускаем их тело.
-                break
-            }
+            if (t.type == INTERP_CLOSE || t.type == STATEMENT_CLOSE) return j + 1
+            // Вложенных выражений быть не может, но на малформированном входе
+            // открывающий разделитель встретиться способен — отдаём его наружу.
+            if (t.type == INTERP_OPEN || t.type == STATEMENT_OPEN) return j
             if (t.type == VAR &&
                 text.substring(t.range.startOffset, t.range.endOffset) == JinjaSpec.formVariable
             ) {
@@ -238,13 +265,6 @@ object SmartAppJinjaLexer {
                     nextSkippingWhitespace(text, tokens, tokens.indexOf(dot) + 1) else null
                 if (field != null && field.type == VAR) {
                     val fieldIdx = tokens.indexOf(field)
-                    // Правая граница: подобъекты main_form.x.y не разбираем —
-                    // ссылку и WARNING не создаём вовсе.
-                    val next = neighborSkippingWhitespace(text, tokens, fieldIdx + 1, +1)
-                    if (next != null && next.type == DOT) {
-                        j = fieldIdx + 1
-                        continue
-                    }
                     val fieldName = text.substring(field.range.startOffset, field.range.endOffset)
                     result.add(SmartAppFieldCandidate(JinjaSpec.formVariable, fieldName, field.range))
                     j = fieldIdx + 1
@@ -253,21 +273,7 @@ object SmartAppJinjaLexer {
             }
             j++
         }
-        // Рекурсивно обрабатываем остальные интерполяции в литерале.
-        result += scanMoreInterps(text, tokens, j)
-        return result
-    }
-
-    /** Собирает кандидатов из интерполяций после позиции [afterIdx]. */
-    private fun scanMoreInterps(text: String, tokens: List<SmartAppJinjaToken>, afterIdx: Int): List<SmartAppFieldCandidate> {
-        var k = afterIdx
-        while (k < tokens.size) {
-            if (tokens[k].type == INTERP_OPEN) {
-                return collectFromInterp(text, tokens, k)
-            }
-            k++
-        }
-        return emptyList()
+        return j
     }
 
     /**

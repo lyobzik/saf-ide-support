@@ -21,19 +21,22 @@ data class FormFieldRef(val form: String, val field: String)
  * Определяет целевую форму Jinja-ссылки и опознаёт определения полей для
  * Find Usages.
  *
- * Семантика `{{ main_form.<field> }}`: целевая форма — это форма, на которую
- * ссылается **top-level свойство `form` того же сценария**, в котором встретился
- * literal. Поиск sibling `form` у непосредственного владельца literal был бы
- * ошибочен: Jinja обычно стоит во вложенном action/field/question-объекте, а
- * `form` находится в top-level объекте сценария.
+ * Целевая форма зависит от вида файла:
+ * - в **сценарии** её называет top-level свойство `form` того же сценария.
+ *   Поиск sibling `form` у непосредственного владельца literal был бы ошибочен:
+ *   Jinja обычно стоит во вложенном action/field/question-объекте, а `form` —
+ *   в top-level объекте сценария;
+ * - в **файле формы** `main_form` — это сама форма, внутри определения которой
+ *   стоит literal: отдельного указателя на неё в файле нет.
  */
 object SmartAppFieldRef {
 
     /**
      * Имя целевой формы для Jinja-ссылки в [literal] или `null`, если форма
-     * неизвестна. Возвращает имя только для статической строковой `form` без
-     * Jinja: динамический выбор формы (`"form": "{{ main_form.name }}"`) не даёт
-     * однозначной цели, и поле в нём не резолвится и не помечается как ошибка.
+     * неизвестна. Для сценария имя берётся только из статической строковой
+     * `form` без Jinja: динамический выбор формы (`"form": "{{ main_form.name }}"`)
+     * не даёт однозначной цели, и поле в нём не резолвится и не помечается как
+     * ошибка.
      *
      * [fileKind] — вид файла; по умолчанию определяется по [literal.containingFile].
      * Параметр нужен для автодополнения, которое работает на in-memory копии,
@@ -43,7 +46,17 @@ object SmartAppFieldRef {
         literal: JsonStringLiteral,
         fileKind: SmartAppRefKind? = SmartAppFiles.kindOf(literal.containingFile),
     ): String? {
-        val scenarioProp = topLevelScenarioProperty(literal, fileKind) ?: return null
+        val topLevel = topLevelProperty(literal) ?: return null
+        return when (fileKind) {
+            SmartAppRefKind.SCENARIO -> formOfScenario(topLevel)
+            // Внутри файла формы main_form — это само top-level определение.
+            SmartAppRefKind.FORM -> topLevel.name.ifEmpty { null }
+            else -> null
+        }
+    }
+
+    /** Форма, названная свойством `form` top-level объекта сценария. */
+    private fun formOfScenario(scenarioProp: JsonProperty): String? {
         val scenarioObj = scenarioProp.value as? JsonObject ?: return null
         val formProp = scenarioObj.findProperty(FieldAccessSpec.formProperty) ?: return null
         val formLiteral = formProp.value as? JsonStringLiteral ?: return null
@@ -69,12 +82,8 @@ object SmartAppFieldRef {
         return SmartAppFiles.kindOf(property.containingFile) == SmartAppRefKind.FORM
     }
 
-    /**
-     * Поднимается от [start] до top-level свойства-определения сценария, если
-     * файл — сценарий ([fileKind]). Иначе `null`.
-     */
-    private fun topLevelScenarioProperty(start: PsiElement, fileKind: SmartAppRefKind?): JsonProperty? {
-        if (fileKind != SmartAppRefKind.SCENARIO) return null
+    /** Поднимается от [start] до top-level свойства-определения файла. */
+    private fun topLevelProperty(start: PsiElement): JsonProperty? {
         var current: PsiElement? = start
         // Поднимаемся по родителям, пока не найдём JsonProperty, чей
         // владелец-объект — корневой объект файла.

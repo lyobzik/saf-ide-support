@@ -1,4 +1,4 @@
-import { allKeywords, jinja, keywordsByCategory } from "./contract";
+import { allKeywords, jinja, keywordsByCategory, typeContext } from "./contract";
 import { propertyName, propertyValue, propertyOf, stringNodeAt, type Node } from "./ast";
 import { isJinja } from "./jinja";
 import { decode, rawText } from "./jsonDecode";
@@ -37,13 +37,17 @@ export interface CompletionResult {
 const EMPTY: CompletionResult = { kind: "name", items: [], replaceStart: 0, replaceEnd: 0 };
 
 /**
- * Контекст между `{{` и кареткой, открывающий completion имени поля:
- * опциональные пробелы, переменная формы, точка и, возможно, начатый
- * идентификатор. Полный матч: цепочка (`main_form.x.`) или не-идентификатор
- * (`main_form.2`) completion не открывают — такие позиции всё равно не резолвятся.
+ * Хвост выражения перед кареткой, открывающий completion имени поля: переменная
+ * формы, точка и, возможно, начатый идентификатор — и конец. Слева от переменной
+ * — начало выражения либо ближайший непробельный символ, не входящий в
+ * идентификатор и не точка: `variables.main_form.` — обращение к чужому полю.
+ * Проверяется именно хвост: в statement-теге слева стоит ещё и `set x = `.
+ * Цепочка (`main_form.x.`) и не-идентификатор (`main_form.2`) completion не
+ * открывают — такие позиции всё равно не резолвятся.
  */
 const formContextPattern = new RegExp(
-  String.raw`^\s*${escapeRegExp(jinja.formVariable)}\s*\.\s*(?:[A-Za-z_$À-￿][A-Za-z0-9_$À-￿]*)?$`,
+  String.raw`(?:^|[^A-Za-z0-9_$À-￿.\s])\s*${escapeRegExp(jinja.formVariable)}\s*\.\s*` +
+    String.raw`(?:[A-Za-z_$À-￿][A-Za-z0-9_$À-￿]*)?$`,
 );
 
 export function completionAt(
@@ -65,7 +69,11 @@ export function completionAt(
   }
 
   const property = propertyOf(node);
-  if (property !== undefined && propertyValue(property) === node && propertyName(property) === "type") {
+  if (
+    property !== undefined &&
+    propertyValue(property) === node &&
+    propertyName(property) === typeContext.typeProperty
+  ) {
     return keywordCompletion(context, property, node, offset);
   }
 
@@ -110,8 +118,9 @@ function nameCompletion(
 }
 
 /**
- * Поля целевой формы внутри `{{ main_form.<caret> }}`. Форма определяется так же,
- * как при резолве; при динамической форме вариантов нет.
+ * Поля целевой формы после `main_form.<caret>` внутри выражения Jinja —
+ * интерполяции или statement-тега. Форма определяется так же, как при резолве;
+ * при динамической форме вариантов нет.
  */
 function fieldCompletion(
   index: SmartAppIndex,
@@ -132,15 +141,16 @@ function fieldCompletion(
   const decodedCaret = decodedCaretOf(decoded.decodedToRaw, rawCaret);
 
   // Контекст каретки определяем тем же лексером, что подсветка и резолв.
-  // Fallback с достроенным `}}`: в момент набора интерполяция обычно ещё не
-  // закрыта, и лексер отдаёт её одним TEXT.
-  const interpOpenEnd =
-    interpContextAt(decoded.text, decodedCaret) ??
-    interpContextAt(`${decoded.text}}}`, decodedCaret);
-  if (interpOpenEnd === undefined) return EMPTY;
+  // Fallback с достроенным разделителем: в момент набора выражение обычно ещё
+  // не закрыто, и лексер отдаёт его одним TEXT.
+  const exprOpenEnd =
+    exprContextAt(decoded.text, decodedCaret) ??
+    exprContextAt(`${decoded.text}}}`, decodedCaret) ??
+    exprContextAt(`${decoded.text}%}`, decodedCaret);
+  if (exprOpenEnd === undefined) return EMPTY;
 
-  const afterInterp = decoded.text.slice(interpOpenEnd, decodedCaret);
-  if (!formContextPattern.test(afterInterp)) return EMPTY;
+  const afterOpen = decoded.text.slice(exprOpenEnd, decodedCaret);
+  if (!formContextPattern.test(afterOpen)) return EMPTY;
 
   const form = targetFormOf(node, context.kind);
   if (form === undefined) return EMPTY;
@@ -183,26 +193,25 @@ function decodedCaretOf(decodedToRaw: readonly number[], rawCaret: number): numb
 }
 
 /**
- * Смещение конца открывающего `{{`, если каретка стоит внутри актуальной
- * открытой интерполяции. Каретка внутри statement-тега или строки Jinja
- * интерполяцией не считается.
+ * Смещение конца открывающего разделителя (`{{` или `{%`), если каретка стоит
+ * внутри актуального открытого выражения. Каретка внутри строки Jinja позицией
+ * поля не считается.
  */
-function interpContextAt(decodedText: string, decodedCaret: number): number | undefined {
-  let inInterp = false;
-  let interpOpenEnd = -1;
+function exprContextAt(decodedText: string, decodedCaret: number): number | undefined {
+  let inExpr = false;
+  let exprOpenEnd = -1;
 
   for (const token of tokenize(decodedText)) {
     if (token.start >= decodedCaret) break;
     switch (token.type) {
       case TokenType.INTERP_OPEN:
-        inInterp = true;
-        interpOpenEnd = token.end;
+      case TokenType.STATEMENT_OPEN:
+        inExpr = true;
+        exprOpenEnd = token.end;
         break;
       case TokenType.INTERP_CLOSE:
-        inInterp = false;
-        break;
-      case TokenType.STATEMENT_OPEN:
-        inInterp = false;
+      case TokenType.STATEMENT_CLOSE:
+        inExpr = false;
         break;
       case TokenType.STRING:
         // Каретка строго внутри строки — это не позиция поля формы.
@@ -212,7 +221,7 @@ function interpContextAt(decodedText: string, decodedCaret: number): number | un
         break;
     }
   }
-  return inInterp && interpOpenEnd >= 0 ? interpOpenEnd : undefined;
+  return inExpr && exprOpenEnd >= 0 ? exprOpenEnd : undefined;
 }
 
 /** Имя, которое лексер способен распознать как идентификатор поля. */

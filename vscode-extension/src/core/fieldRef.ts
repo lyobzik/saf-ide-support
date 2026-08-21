@@ -18,17 +18,24 @@ export interface FormFieldRef {
  * Целевая форма Jinja-ссылки и опознание определений полей. Порт
  * `SmartAppFieldRef.kt`.
  *
- * Семантика `{{ main_form.<field> }}`: целевая форма — та, на которую ссылается
- * **top-level свойство `form` того же сценария**. Искать `form` у ближайшего
- * владельца было бы неверно: Jinja обычно стоит во вложенном
- * action/field/question-объекте, а `form` лежит в top-level объекте сценария.
+ * Целевая форма зависит от вида файла:
+ * - в **сценарии** её называет top-level свойство `form` того же сценария.
+ *   Искать `form` у ближайшего владельца было бы неверно: Jinja обычно стоит во
+ *   вложенном action/field/question-объекте, а `form` лежит в top-level объекте;
+ * - в **файле формы** `main_form` — это сама форма, внутри определения которой
+ *   стоит узел: отдельного указателя на неё в файле нет.
  */
 export function targetFormOf(node: Node, fileKind: RefKind | undefined): string | undefined {
+  const topLevel = enclosingTopLevelProperty(node);
+  if (topLevel === undefined) return undefined;
+
+  if (fileKind === KIND.FORM) {
+    const name = propertyName(topLevel);
+    return name !== undefined && name.length > 0 ? name : undefined;
+  }
   if (fileKind !== KIND.SCENARIO) return undefined;
 
-  const scenarioProperty = enclosingTopLevelProperty(node);
-  if (scenarioProperty === undefined) return undefined;
-  const scenarioObject = propertyValue(scenarioProperty);
+  const scenarioObject = propertyValue(topLevel);
   if (scenarioObject?.type !== "object") return undefined;
 
   const formProperty = findProperty(scenarioObject, fieldAccess.formProperty);

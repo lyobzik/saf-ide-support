@@ -15,10 +15,12 @@ import ru.sber.smartapp.dsl.SmartAppRefKind
 import ru.sber.smartapp.dsl.SmartAppScopes
 import ru.sber.smartapp.dsl.SmartAppTypeContext
 import ru.sber.smartapp.dsl.contract.SmartAppSpecs
+import ru.sber.smartapp.dsl.contract.TypeContextSpec
 import ru.sber.smartapp.dsl.index.SmartAppDefinitionIndex
 import ru.sber.smartapp.dsl.index.SmartAppFormFieldIndex
 import ru.sber.smartapp.dsl.reference.JsonStringLiteralDecoder
 import ru.sber.smartapp.dsl.reference.SmartAppFieldRef
+import ru.sber.smartapp.dsl.reference.SmartAppFileRefRules
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaLexer
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType
 import ru.sber.smartapp.dsl.reference.SmartAppReferenceContributor
@@ -71,7 +73,7 @@ class SmartAppAnnotator : Annotator, DumbAware {
         }
 
         // Подсветка ключевого слова в значении type (чисто PSI, безопасно в dumb mode).
-        if (property != null && property.name == "type" && property.value === literal &&
+        if (property != null && property.name == TypeContextSpec.typeProperty && property.value === literal &&
             isKeywordInContext(property, fileKind, literal.value)
         ) {
             holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
@@ -81,7 +83,31 @@ class SmartAppAnnotator : Annotator, DumbAware {
             return
         }
 
+        // Ссылка на файл шаблона резолвится по файловой системе, а не по
+        // индексу, поэтому проверяется до индекс-зависимой ветки и без guard'а.
+        if (SmartAppFileRefRules.isFileReference(literal)) {
+            annotateUnresolvedTemplateFile(literal, holder)
+            return
+        }
+
         annotateUnresolvedReference(literal, holder)
+    }
+
+    /**
+     * WARNING «Не удаётся разрешить файл шаблона…», если значение `file` не
+     * указывает на существующий файл. Значения с Jinja и выходящие за пределы
+     * каталога поиска молчат: чем они являются, из контракта не следует.
+     */
+    private fun annotateUnresolvedTemplateFile(literal: JsonStringLiteral, holder: AnnotationHolder) {
+        val name = literal.value
+        if (name.isEmpty()) return
+        // Пустой список кандидатов — значение динамическое или выходит за
+        // пределы каталога: цель не определена, а не «файл не найден».
+        if (SmartAppFileRefRules.candidatePaths(literal).isEmpty()) return
+        if (SmartAppFileRefRules.resolve(literal) != null) return
+        holder.newAnnotation(HighlightSeverity.WARNING, "Не удаётся разрешить файл шаблона '$name'")
+            .range(literal.textRange)
+            .create()
     }
 
     /**
@@ -125,9 +151,10 @@ class SmartAppAnnotator : Annotator, DumbAware {
     }
 
     /**
-     * WARNING «Не удаётся разрешить поле…» для `{{ main_form.<id> }}`, если форма
-     * известна, но поля с этим именем в ней нет. Statement-теги `{% … %}` и
-     * динамический `form` молчат (нет ложного WARNING).
+     * WARNING «Не удаётся разрешить поле…» для `main_form.<id>` в любом
+     * выражении Jinja (интерполяция или statement-тег), если форма известна, но
+     * поля с этим именем в ней нет. Динамический `form` молчит: однозначной
+     * цели нет, ложного WARNING быть не должно.
      */
     private fun annotateUnresolvedJinjaField(
         literal: JsonStringLiteral,
@@ -140,8 +167,8 @@ class SmartAppAnnotator : Annotator, DumbAware {
         val form = SmartAppFieldRef.targetFormOf(literal) ?: return
         val baseOffset = literal.textOffset + 1
 
-        // fieldCandidates возвращает только вхождения внутри {{ … }} (statement
-        // исключены), с диапазоном в decoded-координатах.
+        // fieldCandidates возвращает вхождения из всех выражений Jinja —
+        // и интерполяций, и statement-тегов — в decoded-координатах.
         for (candidate in SmartAppJinjaLexer.fieldCandidates(decoded.text)) {
             val fieldName = candidate.field
             val found = SmartAppFormFieldIndex.findFields(

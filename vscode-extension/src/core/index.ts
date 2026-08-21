@@ -9,7 +9,7 @@ import {
   type Node,
   type ParsedDocument,
 } from "./ast";
-import { kindOf, referencesRoot } from "./files";
+import { kindOf, pathSegments, referencesRoot } from "./files";
 import { indexEligibility } from "./indexGate";
 import { isJinja } from "./jinja";
 import { decode, rawText } from "./jsonDecode";
@@ -76,8 +76,19 @@ interface FileEntry {
 const inScope = (entry: FileEntry, scopeRoot: string | undefined): boolean =>
   scopeRoot === undefined || entry.scopeRoot === scopeRoot;
 
+/** Путь URI без схемы — те же координаты, в которых работает `referencesRoot`. */
+const pathKey = (uri: string): string => pathSegments(uri).join("/");
+
 export class SmartAppIndex {
   private readonly files = new Map<string, FileEntry>();
+  /**
+   * Файлы набора `references`, не являющиеся DSL-файлами: шаблоны Jinja и
+   * прочее содержимое, на которое ссылаются по имени. Ключ — путь без схемы
+   * URI, в тех же координатах, что отдаёт `referencesRoot`, чтобы кандидата
+   * можно было собрать конкатенацией. Текст таких файлов не читается: нужен
+   * только факт существования.
+   */
+  private readonly assets = new Map<string, string>();
   private ready = false;
 
   /**
@@ -95,14 +106,38 @@ export class SmartAppIndex {
 
   clear(): void {
     this.files.clear();
+    this.assets.clear();
     this.ready = false;
+  }
+
+  /**
+   * Регистрирует не-DSL файл набора `references` (шаблон и т.п.). Вызывается
+   * адаптером напрямую, чтобы не читать содержимое такого файла.
+   */
+  noteFile(uri: string): void {
+    this.assets.set(pathKey(uri), uri);
+  }
+
+  /** URI первого существующего файла из кандидатов, либо `undefined`. */
+  findFile(candidates: readonly string[]): string | undefined {
+    for (const candidate of candidates) {
+      const uri = this.assets.get(candidate);
+      if (uri !== undefined) return uri;
+    }
+    return undefined;
   }
 
   /** Добавляет или заменяет содержимое файла в индексе. */
   upsert(uri: string, text: string): void {
     this.remove(uri);
     const kind = kindOf(uri);
-    if (kind === undefined) return;
+    if (kind === undefined) {
+      // Не DSL-файл внутри набора references (шаблон Jinja и т.п.): содержимое
+      // не разбирается, важен только факт существования — по нему резолвятся
+      // файловые ссылки.
+      if (referencesRoot(uri) !== undefined) this.noteFile(uri);
+      return;
+    }
 
     const parsed = parseDocument(text);
     const entry: FileEntry = {
@@ -128,6 +163,7 @@ export class SmartAppIndex {
 
   remove(uri: string): void {
     this.files.delete(uri);
+    this.assets.delete(pathKey(uri));
   }
 
   /** Все определения [name] среди [kinds]. */

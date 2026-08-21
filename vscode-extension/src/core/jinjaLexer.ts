@@ -6,8 +6,9 @@ import { jinja } from "./contract";
  * две IDE по-разному подсвечивают и резолвят один и тот же файл.
  *
  * **Не полноценный Jinja-парсер**, а токенизатор для двух целей:
- * 1. найти семантические ссылки `<formVariable>.<id>` — только внутри
- *    интерполяции `{{ … }}` (statement-теги `{% … %}` ссылок не порождают);
+ * 1. найти семантические ссылки `<formVariable>` и `<formVariable>.<id>`
+ *    внутри выражений — и в интерполяциях `{{ … }}`, и в statement-тегах
+ *    `{% … %}`;
  * 2. разметить токены для подсветки.
  *
  * Контракт:
@@ -24,7 +25,7 @@ export enum TokenType {
   INTERP_OPEN = "INTERP_OPEN",
   /** `}}` — закрывающий разделитель интерполяции. */
   INTERP_CLOSE = "INTERP_CLOSE",
-  /** `{%` — открывающий разделитель statement-тега (только подсветка). */
+  /** `{%` — открывающий разделитель statement-тега. */
   STATEMENT_OPEN = "STATEMENT_OPEN",
   /** `%}` — закрывающий разделитель statement-тега. */
   STATEMENT_CLOSE = "STATEMENT_CLOSE",
@@ -119,10 +120,15 @@ export function tokenize(decodedText: string): Token[] {
 }
 
 /**
- * Находит семантические кандидаты `<formVariable>.<id>` внутри интерполяций.
- * Допускает whitespace между переменной, `.` и именем поля. Цепочки не
- * разбираются: переменная в позиции чужого поля (`variables.main_form.x`) и
- * подобъекты (`main_form.x.y`) кандидатов не дают.
+ * Находит семантические кандидаты `<formVariable>.<id>` внутри выражений Jinja —
+ * и интерполяций `{{ … }}`, и statement-тегов `{% … %}`: в бою обращение к полю
+ * одинаково часто стоит в `{% if main_form.x %}`.
+ *
+ * Допускает whitespace между переменной, `.` и именем поля. Кандидатом
+ * становится **первый** сегмент: `main_form.a.b` даёт `a` (хвост цепочки
+ * семантики не получает — у значений полей нет схемы). Левая граница
+ * сохраняется: переменная в позиции чужого поля (`variables.main_form.x`)
+ * кандидата не даёт.
  */
 export function fieldCandidates(decodedText: string): FieldCandidate[] {
   const tokens = tokenize(decodedText);
@@ -130,11 +136,35 @@ export function fieldCandidates(decodedText: string): FieldCandidate[] {
 
   let i = 0;
   while (i < tokens.length) {
-    if (tokens[i]?.type !== TokenType.INTERP_OPEN) {
+    const type = tokens[i]?.type;
+    if (type !== TokenType.INTERP_OPEN && type !== TokenType.STATEMENT_OPEN) {
       i++;
       continue;
     }
-    i = collectFromInterp(decodedText, tokens, i, result);
+    i = collectFromExpr(decodedText, tokens, i, result);
+  }
+  return result;
+}
+
+/**
+ * Диапазоны вхождений переменной формы внутри выражений Jinja.
+ *
+ * Левая граница та же, что у [fieldCandidates]: `variables.main_form` — это
+ * обращение к чужому полю, вхождением переменной формы оно не считается. В
+ * отличие от кандидатов, следующая точка не обязательна: `{{ main_form }}` тоже
+ * указывает на форму.
+ */
+export function formVariableOccurrences(decodedText: string): { start: number; end: number }[] {
+  const tokens = tokenize(decodedText);
+  const result: { start: number; end: number }[] = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i] as Token;
+    if (t.type !== TokenType.VAR) continue;
+    if (decodedText.slice(t.start, t.end) !== jinja.formVariable) continue;
+    const prev = neighborSkippingWhitespace(decodedText, tokens, i - 1, -1);
+    if (prev?.type === TokenType.DOT) continue;
+    result.push({ start: t.start, end: t.end });
   }
   return result;
 }
@@ -210,22 +240,23 @@ function tokenizeExpr(text: string, from: number, until: number, out: Token[]): 
 }
 
 /**
- * Собирает кандидатов из одной интерполяции, начатой токеном [interpStartIdx].
- * Возвращает индекс, с которого продолжать обход.
+ * Собирает кандидатов из одного выражения, начатого токеном [openIdx] (`{{`
+ * или `{%`). Возвращает индекс, с которого продолжать обход.
  */
-function collectFromInterp(
+function collectFromExpr(
   text: string,
   tokens: readonly Token[],
-  interpStartIdx: number,
+  openIdx: number,
   result: FieldCandidate[],
 ): number {
-  let j = interpStartIdx + 1;
+  let j = openIdx + 1;
 
   while (j < tokens.length) {
     const t = tokens[j] as Token;
-    if (t.type === TokenType.INTERP_CLOSE) return j + 1;
-    // Вложенные statement-теги внутри {{ }} невозможны, но защитно выходим.
-    if (t.type === TokenType.STATEMENT_OPEN) return j;
+    if (t.type === TokenType.INTERP_CLOSE || t.type === TokenType.STATEMENT_CLOSE) return j + 1;
+    // Вложенных выражений быть не может, но на малформированном входе
+    // открывающий разделитель встретиться способен — отдаём его наружу.
+    if (t.type === TokenType.INTERP_OPEN || t.type === TokenType.STATEMENT_OPEN) return j;
 
     if (t.type === TokenType.VAR && text.slice(t.start, t.end) === jinja.formVariable) {
       // Левая граница: переменная в позиции чужого поля (variables.main_form.x)
@@ -244,13 +275,6 @@ function collectFromInterp(
       const field = fieldIdx === undefined ? undefined : tokens[fieldIdx];
 
       if (field?.type === TokenType.VAR) {
-        // Правая граница: подобъекты main_form.x.y не разбираем — ни ссылки,
-        // ни предупреждения.
-        const next = neighborSkippingWhitespace(text, tokens, (fieldIdx as number) + 1, +1);
-        if (next?.type === TokenType.DOT) {
-          j = (fieldIdx as number) + 1;
-          continue;
-        }
         result.push({
           form: jinja.formVariable,
           field: text.slice(field.start, field.end),

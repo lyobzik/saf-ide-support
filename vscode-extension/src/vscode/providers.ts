@@ -35,11 +35,16 @@ const contextOf = (document: vscode.TextDocument): DocumentContext =>
 /** Переводит результат ядра в `vscode.Location`, зная текст целевого файла. */
 function toVsLocation(workspace: SmartAppWorkspace, location: Location): vscode.Location | undefined {
   const text = workspace.textOf(location.uri);
-  if (text === undefined) return undefined;
-  return new vscode.Location(
-    vscode.Uri.parse(location.uri),
-    rangeOf(text, location.start, location.end),
-  );
+  const uri = vscode.Uri.parse(location.uri);
+  if (text === undefined) {
+    // Текст файлов, которые индекс знает только по существованию (шаблоны), не
+    // хранится: единственная осмысленная позиция в них — начало файла.
+    if (location.start === 0 && location.end === 0) {
+      return new vscode.Location(uri, new vscode.Position(0, 0));
+    }
+    return undefined;
+  }
+  return new vscode.Location(uri, rangeOf(text, location.start, location.end));
 }
 
 const toVsLocations = (workspace: SmartAppWorkspace, locations: readonly Location[]) =>

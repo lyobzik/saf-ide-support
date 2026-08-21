@@ -81,7 +81,10 @@ export class SmartAppWorkspace implements vscode.Disposable {
   /** Перечитывает файл в индекс, если его не обогнало более свежее обновление. */
   private async reload(uri: vscode.Uri, notify = false): Promise<void> {
     const key = uri.toString();
-    if (!isDslFile(key)) return;
+    if (!isDslFile(key)) {
+      await this.noteAsset(uri, notify);
+      return;
+    }
 
     const generation = this.nextGeneration(key);
     try {
@@ -91,6 +94,29 @@ export class SmartAppWorkspace implements vscode.Disposable {
     } catch {
       if (this.generations.get(key) !== generation) return;
       // Файл исчез или недоступен — просто убираем его из индекса.
+      this.forget(uri);
+    }
+  }
+
+  /**
+   * Регистрирует не-DSL файл набора (шаблон Jinja): содержимое не нужно, важен
+   * только факт существования — по нему резолвятся ссылки вида `"file": "…"`.
+   *
+   * Существование проверяется `stat`, а результат применяется под тем же
+   * счётчиком поколений, что и чтение DSL-файлов: `findFiles` отдаёт снимок, и
+   * файл, удалённый между сканированием и этим вызовом, иначе остался бы в
+   * реестре — переход вёл бы в несуществующий файл.
+   */
+  private async noteAsset(uri: vscode.Uri, notify: boolean): Promise<void> {
+    const key = uri.toString();
+    const generation = this.nextGeneration(key);
+    try {
+      await vscode.workspace.fs.stat(uri);
+      if (this.generations.get(key) !== generation) return;
+      this.index.noteFile(key);
+      if (notify) this.onIndexed.fire();
+    } catch {
+      if (this.generations.get(key) !== generation) return;
       this.forget(uri);
     }
   }

@@ -19,6 +19,7 @@ import ru.sber.smartapp.dsl.SmartAppKeywords
 import ru.sber.smartapp.dsl.SmartAppRefKind
 import ru.sber.smartapp.dsl.SmartAppScopes
 import ru.sber.smartapp.dsl.SmartAppTypeContext
+import ru.sber.smartapp.dsl.contract.TypeContextSpec
 import ru.sber.smartapp.dsl.index.SmartAppNameIndex
 import ru.sber.smartapp.dsl.index.SmartAppFormFieldNameIndex
 import ru.sber.smartapp.dsl.reference.JsonStringLiteralDecoder
@@ -77,7 +78,9 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
             return
         }
 
-        if (property != null && property.value === literal && property.name == "type") {
+        if (property != null && property.value === literal &&
+            property.name == TypeContextSpec.typeProperty
+        ) {
             addKeywordVariants(property, fileKind, result)
             return
         }
@@ -132,21 +135,23 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         val decodedCaret = decodedCaretOf(decoded.decodedToRaw, rawCaret)
 
         // Контекст каретки определяем тем же лексером, что и подсветка/резолв:
-        // completion полей активируется только внутри актуальной открытой
-        // интерполяции {{ … }} — не в statement-теге {% %} и не внутри
-        // Jinja-строки (например default('{{ main_form.<caret>') — это STRING).
-        // Fallback с достроенным "}}": в момент набора интерполяция обычно ещё
-        // не закрыта ({{ main_form.<caret>), и лексер отдаёт её как TEXT.
-        val interpOpenEnd = interpContextAt(decoded.text, decodedCaret)
-            ?: interpContextAt(decoded.text + "}}", decodedCaret)
+        // completion полей активируется внутри актуального открытого выражения
+        // ({{ … }} или {% … %}), но не внутри Jinja-строки (например
+        // default('{{ main_form.<caret>') — это STRING).
+        // Fallback с достроенным разделителем: в момент набора выражение обычно
+        // ещё не закрыто, и лексер отдаёт его как TEXT.
+        val exprOpenEnd = exprContextAt(decoded.text, decodedCaret)
+            ?: exprContextAt(decoded.text + "}}", decodedCaret)
+            ?: exprContextAt(decoded.text + "%}", decodedCaret)
             ?: return
-        // Между `{{` и кареткой должен быть ровно `main_form.` (с допуском
+        // Непосредственно перед кареткой должно стоять `main_form.` (с допуском
         // пробелов) и далее — только частичный идентификатор поля: цепочки
         // `main_form.x.<caret>` резолва не имеют (см. границы fieldCandidates),
-        // и completion там предлагал бы заведомо битые варианты. Полный матч
-        // (matches), а не containsMatchIn: хвост до каретки валидируется целиком.
-        val afterInterp = decoded.text.substring(interpOpenEnd, decodedCaret)
-        if (!MAIN_FORM_CONTEXT.matches(afterInterp)) return
+        // и completion там предлагал бы заведомо битые варианты. Проверяется
+        // именно хвост, а не всё выражение: в statement-теге слева от обращения
+        // стоит ещё и `set x = `.
+        val afterOpen = decoded.text.substring(exprOpenEnd, decodedCaret)
+        if (!MAIN_FORM_TAIL.containsMatchIn(afterOpen)) return
 
         val form = SmartAppFieldRef.targetFormOf(literal, fileKind) ?: return
         val scope = SmartAppScopes.forPsiFile(originalFile)
@@ -195,35 +200,29 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
     }
 
     /**
-     * Смещение конца открывающего `{{`, если позиция [decodedCaret] находится
-     * внутри актуальной открытой интерполяции, иначе `null`. Каретка внутри
-     * statement-тега `{% … %}` или Jinja-строки [SmartAppJinjaTokenType.STRING]
-     * интерполяцией не считается.
+     * Смещение конца открывающего разделителя (`{{` или `{%`), если позиция
+     * [decodedCaret] находится внутри актуального открытого выражения, иначе
+     * `null`. Каретка внутри Jinja-строки [SmartAppJinjaTokenType.STRING]
+     * позицией поля не считается.
      */
-    private fun interpContextAt(decodedText: String, decodedCaret: Int): Int? {
-        var inInterp = false
-        var inStatement = false
-        var interpOpenEnd = -1
+    private fun exprContextAt(decodedText: String, decodedCaret: Int): Int? {
+        var inExpr = false
+        var exprOpenEnd = -1
         for (token in SmartAppJinjaLexer.tokenize(decodedText)) {
             if (token.range.startOffset >= decodedCaret) break
             when (token.type) {
-                SmartAppJinjaTokenType.INTERP_OPEN -> {
-                    inInterp = true
-                    inStatement = false
-                    interpOpenEnd = token.range.endOffset
+                SmartAppJinjaTokenType.INTERP_OPEN, SmartAppJinjaTokenType.STATEMENT_OPEN -> {
+                    inExpr = true
+                    exprOpenEnd = token.range.endOffset
                 }
-                SmartAppJinjaTokenType.INTERP_CLOSE -> inInterp = false
-                SmartAppJinjaTokenType.STATEMENT_OPEN -> {
-                    inStatement = true
-                    inInterp = false
-                }
-                SmartAppJinjaTokenType.STATEMENT_CLOSE -> inStatement = false
+                SmartAppJinjaTokenType.INTERP_CLOSE, SmartAppJinjaTokenType.STATEMENT_CLOSE ->
+                    inExpr = false
                 // Каретка строго внутри строки — это не позиция поля формы.
                 SmartAppJinjaTokenType.STRING -> if (decodedCaret < token.range.endOffset) return null
                 else -> {}
             }
         }
-        return if (inInterp && !inStatement) interpOpenEnd else null
+        return if (inExpr) exprOpenEnd else null
     }
 
     private fun addNameVariants(
@@ -257,13 +256,17 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         const val NAME_PRIORITY = 50.0
         const val FIELD_PRIORITY = 30.0
 
-        // Полный контекст между `{{` и кареткой, открывающий completion имени
-        // поля: опциональные пробелы, `main_form`, опциональные пробелы, точка,
-        // опциональный частичный идентификатор (первый символ — identifierStart,
-        // как у VAR лексера). Полный матч: хвост вроде `x.` (цепочка) или
-        // `2` (не-идентификатор) completion не открывает.
-        val MAIN_FORM_CONTEXT: Regex = Regex(
-            """^\s*main_form\s*\.\s*(?:\p{javaJavaIdentifierStart}\p{javaJavaIdentifierPart}*)?$""",
+        // Хвост выражения перед кареткой, открывающий completion имени поля:
+        // `main_form`, опциональные пробелы, точка, опциональный частичный
+        // идентификатор (первый символ — identifierStart, как у VAR лексера) и
+        // конец. Слева от `main_form` — начало выражения либо ближайший непробельный
+        // символ, не входящий в идентификатор и не точка: `variables.main_form.`
+        // и `variables. main_form.` — обращение к чужому полю, `xmain_form.` —
+        // вообще другое имя. Хвост `x.` (цепочка) и `2` (не-идентификатор)
+        // completion не открывают.
+        val MAIN_FORM_TAIL: Regex = Regex(
+            """(?:^|[^\p{javaJavaIdentifierPart}.\s])\s*main_form\s*\.\s*""" +
+                """(?:\p{javaJavaIdentifierStart}\p{javaJavaIdentifierPart}*)?$""",
         )
     }
 }

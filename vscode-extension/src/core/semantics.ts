@@ -4,6 +4,7 @@ import {
   fieldAccess,
   keywordsByCategory,
   structuralKeys,
+  typeContext,
   type RefKind,
 } from "./contract";
 import {
@@ -19,9 +20,10 @@ import {
 import { kindOf, referencesRoot } from "./files";
 import { isJinja } from "./jinja";
 import { decode, rawText } from "./jsonDecode";
-import { fieldCandidates } from "./jinjaLexer";
+import { fieldCandidates, formVariableOccurrences } from "./jinjaLexer";
 import { targetFormOf } from "./fieldRef";
 import { targetKinds } from "./refRules";
+import { candidateUris, isFileReference } from "./fileRefRules";
 import { categoryFor } from "./typeContext";
 import type { Definition, FieldDefinition, Location, SmartAppIndex } from "./index";
 
@@ -65,12 +67,17 @@ export interface FieldHit {
   readonly end: number;
 }
 
+/** Файл-цель: у ссылки на шаблон нет имени и ordinal, позиция — начало файла. */
+export interface FileTarget extends Location {
+  readonly target: "file";
+}
+
 /** Определения, на которые ведёт позиция offset. */
 export function definitionsAt(
   index: SmartAppIndex,
   context: DocumentContext,
   offset: number,
-): (Definition | FieldDefinition)[] {
+): (Definition | FieldDefinition | FileTarget)[] {
   if (!index.isReady() || context.kind === undefined) return [];
 
   const node = stringNodeAt(context.parsed.root, offset);
@@ -78,9 +85,18 @@ export function definitionsAt(
 
   const value = node.value as string;
   if (isJinja(value)) {
+    // Сама переменная `main_form` ведёт на определение целевой формы.
+    const form = formVariableAt(node, context, offset);
+    if (form !== undefined) return index.findDefinitions(form, [KIND.FORM], context.scopeRoot);
+
     const hit = fieldHitAt(node, context, offset);
     if (hit === undefined) return [];
     return index.findFields(hit.form, hit.field, context.scopeRoot);
+  }
+
+  if (isFileReference(node)) {
+    const uri = index.findFile(candidateUris(node, value, context.scopeRoot));
+    return uri === undefined ? [] : [{ target: "file", uri, start: 0, end: 0 }];
   }
 
   const kinds = targetKinds(node, context.kind);
@@ -168,6 +184,22 @@ export function diagnostics(index: SmartAppIndex, context: DocumentContext): Dia
       return;
     }
 
+    // Ссылка на файл шаблона: цель ищется по пути, а не по индексу определений.
+    if (isFileReference(node)) {
+      if (value.length === 0) return;
+      const candidates = candidateUris(node, value, context.scopeRoot);
+      // Пустой список — значение динамическое или выходит за пределы каталога:
+      // чем оно является, из контракта не следует, и молчание честнее ошибки.
+      if (candidates.length === 0) return;
+      if (index.findFile(candidates) !== undefined) return;
+      result.push({
+        start: node.offset,
+        end: node.offset + node.length,
+        message: `Не удаётся разрешить файл шаблона '${value}'`,
+      });
+      return;
+    }
+
     const kinds = targetKinds(node, context.kind);
     if (kinds.length === 0 || value.length === 0) return;
     if (index.findDefinitions(value, kinds, context.scopeRoot).length > 0) return;
@@ -187,7 +219,7 @@ export function diagnostics(index: SmartAppIndex, context: DocumentContext): Dia
 export function keywordCategoryAt(node: Node, kind: RefKind | undefined): string | undefined {
   const property = propertyOf(node);
   if (property === undefined || propertyValue(property) !== node) return undefined;
-  if (propertyName(property) !== "type") return undefined;
+  if (propertyName(property) !== typeContext.typeProperty) return undefined;
   return categoryFor(property, kind);
 }
 
@@ -232,8 +264,48 @@ export function fieldHits(node: Node, context: DocumentContext): FieldHit[] {
   return hits;
 }
 
+/**
+ * Имя целевой формы, если [offset] стоит на переменной формы внутри Jinja.
+ * Имени формы в тексте нет — оно вычислено по контексту, поэтому использованием
+ * формы такое вхождение не считается и переименованию не подлежит.
+ */
+function formVariableAt(
+  node: Node,
+  context: DocumentContext,
+  offset: number,
+): string | undefined {
+  if (!isValueNode(node)) return undefined;
+  const raw = rawText(context.text.slice(node.offset, node.offset + node.length));
+  if (raw === undefined) return undefined;
+  const form = targetFormOf(node, context.kind);
+  if (form === undefined) return undefined;
+
+  const decoded = decode(raw);
+  for (const occurrence of formVariableOccurrences(decoded.text)) {
+    const rawStart = decoded.decodedToRaw[occurrence.start];
+    const rawEnd = decoded.decodedToRaw[occurrence.end];
+    if (rawStart === undefined || rawEnd === undefined) continue;
+    // +1 — открывающая кавычка литерала.
+    const start = node.offset + 1 + rawStart;
+    const end = node.offset + 1 + rawEnd;
+    if (containsCaret(start, end, offset)) return form;
+  }
+  return undefined;
+}
+
+/**
+ * Попадает ли каретка в диапазон токена. Конец **включается**: это измеренное
+ * поведение платформы IntelliJ (`TextRange.containsOffset`), проверенное
+ * характеризационным тестом `testReferenceBoundaryAtDotIsInclusive`. Каретка
+ * сразу за словом (например на точке после `main_form`) считается стоящей на
+ * нём — иначе F12 в конце слова работал бы в двух редакторах по-разному.
+ */
+function containsCaret(start: number, end: number, offset: number): boolean {
+  return offset >= start && offset <= end;
+}
+
 function fieldHitAt(node: Node, context: DocumentContext, offset: number): FieldHit | undefined {
-  return fieldHits(node, context).find((hit) => offset >= hit.start && offset <= hit.end);
+  return fieldHits(node, context).find((hit) => containsCaret(hit.start, hit.end, offset));
 }
 
 function collectFieldOccurrences(
