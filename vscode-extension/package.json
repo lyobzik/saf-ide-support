@@ -71,7 +71,8 @@
             "variable.other.smartapp"
           ],
           "smartappJinjaOperator": [
-            "punctuation.accessor.smartapp"
+            "punctuation.accessor.smartapp",
+            "punctuation.section.embedded"
           ],
           "smartappJinjaFilter": [
             "support.function.smartapp"

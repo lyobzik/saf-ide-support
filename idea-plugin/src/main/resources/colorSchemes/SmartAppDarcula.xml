@@ -1,0 +1,51 @@
+<!--
+  Цвета SmartApp DSL по умолчанию для тёмной схемы.
+
+  Наследоваться от стандартных ключей платформы здесь нельзя: BRACES, DOT и
+  OPERATION_SIGN в Darcula собственного FOREGROUND не имеют, а silent-аннотация
+  перекрывает цвет строки JSON — Jinja-фрагмент терял зелёный и становился
+  неотличим от обычного текста. Поэтому цвета задаются явно.
+
+  Палитра — из самой Darcula: оранжевый ключевых слов для разделителей и точки
+  (структура шаблона), фиолетовый полей для переменных, жёлтый функций для
+  фильтров, зелёный строк для строковых литералов Jinja.
+-->
+<scheme name="Darcula" version="142" parent_scheme="Darcula">
+    <attributes>
+        <option name="SMARTAPP_KEYWORD">
+            <value>
+                <option name="FOREGROUND" value="cc7832"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_FIELD">
+            <value>
+                <option name="FOREGROUND" value="9876aa"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_JINJA_DELIM">
+            <value>
+                <option name="FOREGROUND" value="cc7832"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_JINJA_VAR">
+            <value>
+                <option name="FOREGROUND" value="9876aa"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_JINJA_OP">
+            <value>
+                <option name="FOREGROUND" value="cc7832"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_JINJA_FILTER">
+            <value>
+                <option name="FOREGROUND" value="ffc66d"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_JINJA_STRING">
+            <value>
+                <option name="FOREGROUND" value="6a8759"/>
+            </value>
+        </option>
+    </attributes>
+</scheme>

@@ -4,10 +4,17 @@ import com.intellij.openapi.editor.DefaultLanguageHighlighterColors
 import com.intellij.openapi.editor.colors.TextAttributesKey
 
 /**
- * Ключи текстовых атрибутов, используемые аннотатором SmartApp DSL. Значения по
- * умолчанию наследуются от стандартных языковых цветов, чтобы подсветка вписалась
- * в любую тему; пользователь может переопределить их на странице цветов
- * «SmartApp DSL».
+ * Ключи текстовых атрибутов, используемые аннотатором SmartApp DSL.
+ *
+ * Собственные цвета по умолчанию поставляются схемами
+ * `resources/colorSchemes/SmartApp{Default,Darcula}.xml` (см.
+ * `additionalTextAttributes` в `plugin.xml`) — на одном наследовании подсветка
+ * не видна: `BRACES`, `DOT` и `OPERATION_SIGN` собственного цвета в схемах
+ * платформы не имеют, а silent-аннотация при этом перекрывает цвет строки JSON.
+ *
+ * Fallback-ключи ниже работают в темах, которые не наследуют наши схемы,
+ * поэтому среди них не должно быть бесцветных. Пользователь может переопределить
+ * любой ключ на странице цветов «SmartApp DSL».
  */
 object SmartAppTextAttributes {
 
@@ -24,25 +31,29 @@ object SmartAppTextAttributes {
     /** `{{`, `}}`, `{%`, `%}` — разделители Jinja-выражений. */
     val JINJA_DELIM: TextAttributesKey = TextAttributesKey.createTextAttributesKey(
         "SMARTAPP_JINJA_DELIM",
-        DefaultLanguageHighlighterColors.BRACES,
+        DefaultLanguageHighlighterColors.KEYWORD,
     )
 
-    /** Переменная/идентификатор внутри Jinja (`main_form`, имя поля). */
+    /**
+     * Переменная/идентификатор внутри Jinja (`main_form`, имя поля). Fallback —
+     * не `IDENTIFIER`: его цвет в схемах платформы совпадает с цветом обычного
+     * текста, и переменная переставала отличаться от строки, в которой стоит.
+     */
     val JINJA_VAR: TextAttributesKey = TextAttributesKey.createTextAttributesKey(
         "SMARTAPP_JINJA_VAR",
-        DefaultLanguageHighlighterColors.IDENTIFIER,
+        DefaultLanguageHighlighterColors.INSTANCE_FIELD,
     )
 
     /** Оператор `.` (доступ к полю объекта) внутри Jinja. */
     val JINJA_OP: TextAttributesKey = TextAttributesKey.createTextAttributesKey(
         "SMARTAPP_JINJA_OP",
-        DefaultLanguageHighlighterColors.DOT,
+        DefaultLanguageHighlighterColors.KEYWORD,
     )
 
     /** Оператор фильтра `|` и имя фильтра внутри Jinja. */
     val JINJA_FILTER: TextAttributesKey = TextAttributesKey.createTextAttributesKey(
         "SMARTAPP_JINJA_FILTER",
-        DefaultLanguageHighlighterColors.OPERATION_SIGN,
+        DefaultLanguageHighlighterColors.METADATA,
     )
 
     /** Строковый литерал внутри Jinja (`"…"`) с escape-последовательностями. */

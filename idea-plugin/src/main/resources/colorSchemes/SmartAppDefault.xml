@@ -1,0 +1,47 @@
+<!--
+  Цвета SmartApp DSL по умолчанию для светлой схемы; роли те же, что в
+  SmartAppDarcula.xml, палитра — из схемы Default (тёмно-синий ключевых слов,
+  фиолетовый полей, оливковый метаданных, зелёный строк).
+
+  Цвет фильтра взят не из DEFAULT_FUNCTION_DECLARATION: в светлой схеме он
+  светло-жёлтый и на белом фоне нечитаем.
+-->
+<scheme name="Default" version="142" parent_scheme="Default">
+    <attributes>
+        <option name="SMARTAPP_KEYWORD">
+            <value>
+                <option name="FOREGROUND" value="000080"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_FIELD">
+            <value>
+                <option name="FOREGROUND" value="660e7a"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_JINJA_DELIM">
+            <value>
+                <option name="FOREGROUND" value="000080"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_JINJA_VAR">
+            <value>
+                <option name="FOREGROUND" value="660e7a"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_JINJA_OP">
+            <value>
+                <option name="FOREGROUND" value="000080"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_JINJA_FILTER">
+            <value>
+                <option name="FOREGROUND" value="808000"/>
+            </value>
+        </option>
+        <option name="SMARTAPP_JINJA_STRING">
+            <value>
+                <option name="FOREGROUND" value="008000"/>
+            </value>
+        </option>
+    </attributes>
+</scheme>

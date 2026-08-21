@@ -54,5 +54,18 @@
 
         <colorSettingsPage
             implementation="ru.sber.smartapp.dsl.highlight.SmartAppColorSettingsPage"/>
+
+        <!--
+          Цвета по умолчанию. Без них атрибуты наследуют бесцветные ключи
+          платформы (BRACES/DOT/OPERATION_SIGN), а silent-аннотация при этом
+          перекрывает цвет строки JSON — подсветка Jinja становится не видна.
+        -->
+        <additionalTextAttributes
+            scheme="Default"
+            file="colorSchemes/SmartAppDefault.xml"/>
+
+        <additionalTextAttributes
+            scheme="Darcula"
+            file="colorSchemes/SmartAppDarcula.xml"/>
     </extensions>
 </idea-plugin>
