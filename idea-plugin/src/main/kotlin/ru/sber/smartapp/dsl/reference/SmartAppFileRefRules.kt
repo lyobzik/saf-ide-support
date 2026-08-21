@@ -96,6 +96,20 @@ object SmartAppFileRefRules {
         return if (current.isDirectory) null else current
     }
 
+    /**
+     * Путь предлагается в автодополнении, только если пишется в JSON без
+     * экранирования: без кавычки (U+0022), без обратного слэша (U+005C) и без
+     * управляющих символов (код строго меньше U+0020). Всё остальное разрешено,
+     * включая любые не-ASCII символы.
+     *
+     * Для таких имён decoded-текст совпадает с сырым, поэтому метка, вставляемый
+     * текст и префикс живут в одной системе координат; строить экранированный
+     * `insertText` ради имени с кавычкой в v1 не будем. Предикат обязан
+     * посимвольно совпадать с `isOfferablePath` в ядре расширения.
+     */
+    fun isOfferablePath(path: String): Boolean =
+        path.none { it == '"' || it == '\\' || it.code < 0x20 }
+
     private fun isSafeRelativePath(value: String): Boolean {
         if (value.isEmpty() || value.startsWith("/") || value.contains('\\')) return false
         return value.split('/').none { it.isEmpty() || it == "." || it == ".." }

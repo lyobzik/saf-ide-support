@@ -1,6 +1,7 @@
 import { allKeywords, jinja, keywordsByCategory, typeContext } from "./contract";
 import { propertyName, propertyValue, propertyOf, stringNodeAt, type Node } from "./ast";
 import { isJinja } from "./jinja";
+import { isFileReference, isOfferablePath, searchDirs } from "./fileRefRules";
 import { decode, rawText } from "./jsonDecode";
 import { TokenType, tokenize } from "./jinjaLexer";
 import { targetFormOf } from "./fieldRef";
@@ -18,11 +19,11 @@ import { isValueNode } from "./ast";
  * `CompletionItem` — дело адаптера.
  */
 
-export type CompletionKind = "keyword" | "name" | "field";
+export type CompletionKind = "keyword" | "name" | "field" | "file";
 
 export interface CompletionItem {
   readonly label: string;
-  /** Подпись справа в списке: `type`, вид сущности или `field`. */
+  /** Подпись справа в списке: `type`, вид сущности, `field` или `file`. */
   readonly detail: string;
 }
 
@@ -77,6 +78,10 @@ export function completionAt(
     return keywordCompletion(context, property, node, offset);
   }
 
+  if (isFileReference(node)) {
+    return fileCompletion(index, context, node, offset);
+  }
+
   return nameCompletion(index, context, node, offset);
 }
 
@@ -115,6 +120,31 @@ function nameCompletion(
     }
   }
   return { kind: "name", items, ...literalRange(node, offset) };
+}
+
+/**
+ * Файлы каталогов файловой ссылки (`"file"` при `type: unified_template`) —
+ * пути относительно каталога поиска, вместе с расширением: ровно то, что
+ * принимает резолв.
+ *
+ * Ветка молчит до готовности индекса: реестр файлов набора наполняется в ходе
+ * первичного сканирования, и частичный список молча изменился бы под
+ * пользователем. В плагине IDEA гейта нет — там источник (VFS) полон всегда.
+ */
+function fileCompletion(
+  index: SmartAppIndex,
+  context: DocumentContext,
+  node: Node,
+  offset: number,
+): CompletionResult {
+  if (!index.isReady() || context.scopeRoot === undefined) return EMPTY;
+
+  const items: CompletionItem[] = [];
+  for (const path of index.filesInDirs(context.scopeRoot, searchDirs(node))) {
+    if (!isOfferablePath(path)) continue;
+    items.push({ label: path, detail: "file" });
+  }
+  return { kind: "file", items, ...literalRange(node, offset) };
 }
 
 /**

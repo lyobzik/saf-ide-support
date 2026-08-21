@@ -61,3 +61,22 @@ function isSafeRelativePath(value: string): boolean {
   if (value.length === 0 || value.startsWith("/") || value.includes("\\")) return false;
   return value.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
 }
+
+/**
+ * Путь предлагается в автодополнении, только если пишется в JSON без
+ * экранирования: без кавычки (U+0022), без обратного слэша (U+005C) и без
+ * управляющих символов (код строго меньше U+0020). Всё остальное разрешено,
+ * включая любые не-ASCII символы.
+ *
+ * Для таких имён decoded-текст совпадает с сырым, поэтому метка, вставляемый
+ * текст и префикс живут в одной системе координат; строить экранированный
+ * `insertText` ради имени с кавычкой в v1 не будем. Предикат обязан посимвольно
+ * совпадать с `SmartAppFileRefRules.isOfferablePath` в плагине IDEA.
+ */
+export function isOfferablePath(path: string): boolean {
+  for (const char of path) {
+    if (char === '"' || char === "\\") return false;
+    if ((char.codePointAt(0) as number) < 0x20) return false;
+  }
+  return true;
+}

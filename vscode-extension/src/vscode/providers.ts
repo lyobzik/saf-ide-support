@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { completionAt } from "../core/completion";
+import { completionAt, type CompletionKind } from "../core/completion";
 import type { Location } from "../core/index";
 import { renameEdits, renameLookupAt } from "../core/rename";
 import { SemanticTokenType, semanticTokens } from "../core/semanticTokens";
@@ -102,12 +102,14 @@ export function createCompletionProvider(workspace: SmartAppWorkspace): vscode.C
   };
 }
 
-function completionKind(kind: "keyword" | "name" | "field"): vscode.CompletionItemKind {
+function completionKind(kind: CompletionKind): vscode.CompletionItemKind {
   switch (kind) {
     case "keyword":
       return vscode.CompletionItemKind.Keyword;
     case "field":
       return vscode.CompletionItemKind.Field;
+    case "file":
+      return vscode.CompletionItemKind.File;
     default:
       return vscode.CompletionItemKind.Reference;
   }

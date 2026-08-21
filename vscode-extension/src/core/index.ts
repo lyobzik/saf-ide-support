@@ -118,6 +118,32 @@ export class SmartAppIndex {
     this.assets.set(pathKey(uri), uri);
   }
 
+  /**
+   * Пути файлов внутри `<referencesRoot>/<dir>` для каждого dir из [dirs],
+   * относительно самого dir: объединение каталогов, одинаковый путь — один
+   * вариант.
+   *
+   * Список каталогов приходит параметром, а не берётся из правила: так
+   * многокаталожный случай проверяется тестом, не подделывая данные контракта.
+   * Приоритета у результата нет — какой из одноимённых файлов откроется, решает
+   * резолв ([findFile]); здесь важно лишь, что каждый путь резолвится.
+   */
+  filesInDirs(referencesRoot: string, dirs: readonly string[]): string[] {
+    const paths: string[] = [];
+    const seen = new Set<string>();
+    for (const dir of dirs) {
+      const prefix = `${referencesRoot}/${dir}/`;
+      for (const key of this.assets.keys()) {
+        if (!key.startsWith(prefix)) continue;
+        const relative = key.slice(prefix.length);
+        if (relative.length === 0 || seen.has(relative)) continue;
+        seen.add(relative);
+        paths.push(relative);
+      }
+    }
+    return paths;
+  }
+
   /** URI первого существующего файла из кандидатов, либо `undefined`. */
   findFile(candidates: readonly string[]): string | undefined {
     for (const candidate of candidates) {

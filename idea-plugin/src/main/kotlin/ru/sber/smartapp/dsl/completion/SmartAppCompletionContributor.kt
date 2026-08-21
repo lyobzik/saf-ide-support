@@ -24,9 +24,11 @@ import ru.sber.smartapp.dsl.index.SmartAppNameIndex
 import ru.sber.smartapp.dsl.index.SmartAppFormFieldNameIndex
 import ru.sber.smartapp.dsl.reference.JsonStringLiteralDecoder
 import ru.sber.smartapp.dsl.reference.SmartAppFieldRef
+import ru.sber.smartapp.dsl.reference.SmartAppFileRefRules
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaLexer
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType
 import ru.sber.smartapp.dsl.reference.SmartAppRefRules
+import ru.sber.smartapp.dsl.reference.SmartAppTemplateFiles
 import ru.sber.smartapp.dsl.reference.SmartAppReferenceContributor
 
 /**
@@ -36,10 +38,13 @@ import ru.sber.smartapp.dsl.reference.SmartAppReferenceContributor
  *  - в значении `type` -> ключевые слова категории объемлющего контейнера
  *    (чистое чтение ресурса, доступно во время индексации);
  *  - в значении ссылочного ключа (`form`, `scenario`, ...) -> имена сущностей
- *    из индекса определений (пропускается во время индексации).
+ *    из индекса определений (пропускается во время индексации);
+ *  - в значении файловой ссылки (`"file"` при `type: unified_template`) -> пути
+ *    файлов каталога шаблонов набора (обход VFS, индекс не нужен).
  *
  * [DumbAware]: все чтения индекса под guard'ом [DumbService.isDumb], поэтому в
- * dumb mode работает только не-индексная ветка ключевых слов `type`.
+ * dumb mode работают не-индексные ветки — ключевые слова `type` и файлы
+ * шаблонов.
  */
 class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
 
@@ -82,6 +87,14 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
             property.name == TypeContextSpec.typeProperty
         ) {
             addKeywordVariants(property, fileKind, result)
+            return
+        }
+
+        // Файловая ссылка (`"file"` при `type: unified_template`): цель — файл в
+        // каталоге набора, а не top-level ключ, поэтому и варианты берутся из
+        // VFS, а не из индекса.
+        if (SmartAppFileRefRules.isFileReference(literal)) {
+            addFileVariants(literal, parameters, result)
             return
         }
 
@@ -176,6 +189,54 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
     }
 
     /**
+     * Пути файлов каталогов файловой ссылки — относительно каталога поиска,
+     * вместе с расширением: ровно то, что принимает резолв.
+     *
+     * Индекс здесь не участвует, поэтому dumb-guard'а нет: во время индексации
+     * ветка отдаёт полный список, как и ветка ключевых слов `type`. Расширение,
+     * наоборот, молчит до конца первичного сканирования — там источником служит
+     * реестр, который в этот момент действительно неполон.
+     */
+    private fun addFileVariants(
+        literal: JsonStringLiteral,
+        parameters: CompletionParameters,
+        result: CompletionResultSet,
+    ) {
+        // Корень набора берём у оригинального файла: in-memory копия теряет путь.
+        val root = SmartAppFiles.referencesRoot(parameters.originalFile.virtualFile) ?: return
+        // Префикс задаём сами: платформенный матчер режет путь по `/`, и вложенные
+        // файлы переставали бы совпадать с набранным началом пути.
+        val prefix = pathPrefixBeforeCaret(literal, parameters) ?: return
+        val fileResult = result.withPrefixMatcher(prefix)
+
+        for (path in SmartAppTemplateFiles.pathsIn(root, SmartAppFileRefRules.searchDirs(literal))) {
+            if (!SmartAppFileRefRules.isOfferablePath(path)) continue
+            fileResult.addElement(
+                PrioritizedLookupElement.withPriority(
+                    LookupElementBuilder.create(path).withTypeText("file"),
+                    FILE_PRIORITY,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Часть значения до каретки в decoded-координатах: сравнивать префикс с
+     * меткой нужно в той же системе координат, в какой резолвится сам путь.
+     */
+    private fun pathPrefixBeforeCaret(
+        literal: JsonStringLiteral,
+        parameters: CompletionParameters,
+    ): String? {
+        val rawCaret = parameters.offset - literal.textOffset - 1
+        if (rawCaret < 0) return null
+        val raw = SmartAppReferenceContributor.rawText(literal) ?: return null
+        if (rawCaret > raw.length) return null
+        val decoded = JsonStringLiteralDecoder.decode(raw)
+        return decoded.text.substring(0, decodedCaretOf(decoded.decodedToRaw, rawCaret))
+    }
+
+    /**
      * `true`, если [name] — идентификатор в терминах лексера
      * (`isJavaIdentifierStart`/`isJavaIdentifierPart`): только такие имена полей
      * резолвятся из `{{ main_form.<field> }}`.
@@ -255,6 +316,7 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         const val KEYWORD_PRIORITY = 100.0
         const val NAME_PRIORITY = 50.0
         const val FIELD_PRIORITY = 30.0
+        const val FILE_PRIORITY = 40.0
 
         // Хвост выражения перед кареткой, открывающий completion имени поля:
         // `main_form`, опциональные пробелы, точка, опциональный частичный
