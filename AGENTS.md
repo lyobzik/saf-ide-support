@@ -24,7 +24,8 @@ JSON-парсера редактора**. Возможности (одинако
   `main_form.a.b` семантику получает только первый сегмент;
 - переход с самой переменной `main_form` на определение целевой формы;
 - переход к файлу шаблона: `"file"` при `"type": "unified_template"` ведёт в
-  `static/references/templates/<значение>`.
+  `static/references/templates/<значение>`; в той же позиции автодополняются
+  имена файлов каталога шаблонов (вложенные пути — целиком).
 
 ## Монорепозиторий и два контракта
 
@@ -93,7 +94,8 @@ tools/              # генератор словаря
 | `index/SmartAppFormFieldNameIndex` | Ключ = имя формы, value = имена её полей; для completion полей в Jinja |
 | `index/SmartAppDefinitionValue` + `…Externalizer` | Значение индекса определений и его var-int сериализация (версия в `getVersion()`) |
 | `reference/SmartAppRefRules` | Замороженная таблица правил «условие на узел → target kind(s)» |
-| `reference/SmartAppFileRefRules` + `SmartAppFileReference` | Файловые ссылки (`"file"` при `unified_template`): резолв по пути в каталоге `templates`, без индекса |
+| `reference/SmartAppFileRefRules` + `SmartAppFileReference` | Файловые ссылки (`"file"` при `unified_template`): резолв по пути в каталоге `templates`, без индекса; `findByPath` сверяет регистр каждого сегмента, `isOfferablePath` — предикат JSON-safe имён для completion |
+| `reference/SmartAppTemplateFiles` | Пути файлов каталогов правила для completion: обход VFS с отменой и обрывом циклов по каноническому пути (индекса для этих файлов нет) |
 | `reference/SmartAppReference` | `PsiPolyVariantReferenceBase`, резолв через индекс (под dumb-guard) |
 | `reference/SmartAppReferenceContributor` | Навешивает ссылки на `JsonStringLiteral` (только значения JSON, не ключи): кросс-ссылки, ссылки на поля форм и на саму переменную `main_form` в выражениях Jinja |
 | `reference/SmartAppJinjaLexer` | Детерминированный лексер Jinja-фрагментов внутри строкового литерала (по decoded-тексту); `fieldCandidates`/`formVariableRanges` работают и в `{{ }}`, и в `{% %}`, у цепочки берётся первый сегмент |
@@ -101,7 +103,7 @@ tools/              # генератор словаря
 | `reference/SmartAppFieldRef` + `FormFieldRefDescriptor` | `FormFieldRef(form, field)` — типизированный ключ поля (FIELD не расширяет `SmartAppRefKind`); `targetFormOf` / `isFieldDefinition` |
 | `reference/SmartAppFieldReference` | Поли-вариантная ссылка на поле формы; диапазон только на имя поля |
 | `reference/SmartAppFormVariableReference` | Ссылка с переменной `main_form` на определение целевой формы |
-| `completion/SmartAppCompletionContributor` | `DumbAware`-автодополнение ключевых слов, имён сущностей и полей формы после `main_form.<caret>` в любом выражении Jinja — `{{ }}` и `{% %}` (только identifier-имена) |
+| `completion/SmartAppCompletionContributor` | `DumbAware`-автодополнение ключевых слов, имён сущностей, полей формы после `main_form.<caret>` в любом выражении Jinja — `{{ }}` и `{% %}` (только identifier-имена) — и имён файлов шаблонов в позиции `"file"` |
 | `findusages/SmartAppFindUsagesProvider` + `…ElementDescriptionProvider` | Find Usages для определений и полей форм (подпись `<form>.<field>`); вхождения псевдонима `main_form` в список не входят — имени формы в тексте нет |
 | `rename/SmartAppRenameProcessor` | Ограничивает rename ссылками плагина в своём наборе `references`: иначе платформа переписывает одноимённые ключи чужих наборов |
 | `contract/SmartAppContract` + `SmartAppSpecs` | Таблицы данных DSL (виды, ссылочные правила, ключи контекста, структурные ключи, пути, `main_form`) — их использует рантайм и сериализует экспортёр |
@@ -298,6 +300,28 @@ docs/plans/, docs/insights/, arch/, mds/           # материалы для A
   Происхождение правила: ключа `file` нет в публичных исходниках фреймворка —
   правило выведено из раскладки эталонного приложения (см. комментарий в
   `SmartAppContract.kt`).
+- **Путь шаблона регистрозависим во всех сегментах.** `findFileByRelativePath`
+  полагается на ФС, и на macOS `Items.JINJA2` нашёл бы `items.jinja2` — тогда
+  диагностика зависела бы от машины разработчика, а не от проекта.
+  `SmartAppFileRefRules.findByPath` сверяет фактическое имя каждого сегмента;
+  расширение сравнивает пути точно и так. Фикстуры `myFixture` живут на
+  регистрозависимой in-memory ФС, поэтому регрессию ловит отдельный тест на
+  настоящей ФС (`SmartAppFileRefRulesTest`), а корпус фиксирует контракт.
+- **Автодополнение файлов шаблонов — без гарантий по размеру каталога.** Лимит
+  не вводится сознательно: платформы фильтруют по префиксу уже собранный набор,
+  поэтому выброшенный файл не появился бы и после того, как пользователь набрал
+  его имя целиком. Вместо лимита — отменяемый обход и обрыв циклов. Предлагаются
+  только имена, которые пишутся в JSON без экранирования (нет `"`, `\` и
+  символов с кодом < U+0020): для них decoded-текст совпадает с сырым. Предикат
+  обязан посимвольно совпадать в обеих реализациях (`isOfferablePath`), это
+  закреплено одной таблицей входов в тестах с обеих сторон.
+- **Символические ссылки следуются, паритет — только при настройках по
+  умолчанию.** Внутри каждой реализации политика одна для резолва и completion:
+  ссылка-файл резолвится и предлагается, каталог-ссылка обходится, цикл
+  обрывается по каноническому пути. Но состав реестра в VS Code определяет
+  `workspace.findFiles`, а он подчиняется настройке редактора
+  `search.followSymlinks` (по умолчанию включена); плагин IDEA следует ссылкам
+  всегда. Это осознанное исключение, а не единая политика.
 - **Подсветка обязана быть видимой.** Наследоваться от `BRACES`/`DOT`/
   `OPERATION_SIGN` нельзя: в схемах платформы у них нет своего цвета, а
   silent-аннотация при этом перекрывает цвет строки JSON — фрагмент Jinja
