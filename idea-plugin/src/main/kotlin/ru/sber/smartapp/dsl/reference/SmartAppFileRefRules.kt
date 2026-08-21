@@ -64,10 +64,36 @@ object SmartAppFileRefRules {
         if (candidates.isEmpty()) return null
         val root = SmartAppFiles.referencesRoot(literal.containingFile?.virtualFile) ?: return null
         for (path in candidates) {
-            val found = root.findFileByRelativePath(path)
-            if (found != null && !found.isDirectory) return found
+            val found = findByPath(root, path)
+            if (found != null) return found
         }
         return null
+    }
+
+    /**
+     * Файл по относительному пути [path] внутри [root] — с посегментной сверкой
+     * регистра.
+     *
+     * `findFileByRelativePath` полагается на файловую систему, а на
+     * регистронезависимой ФС (macOS) она находит `items.jinja2` по значению
+     * `Items.JINJA2`. Тогда «ссылка разрешается» зависело бы от машины
+     * разработчика, а не от содержимого проекта: на Linux-CI предупреждение
+     * есть, на Mac его нет. Расширение сравнивает пути точно, поэтому точное
+     * сравнение — общее правило обеих реализаций.
+     *
+     * Каталог целью не является: значение обязано указывать на файл.
+     */
+    fun findByPath(root: VirtualFile, path: String): VirtualFile? {
+        var current = root
+        for (segment in path.split('/')) {
+            if (!current.isDirectory) return null
+            val child = current.findChild(segment) ?: return null
+            // На регистронезависимой ФС findChild вернёт файл с другим регистром
+            // имени — сверяем фактическое имя, а не запрошенное.
+            if (child.name != segment) return null
+            current = child
+        }
+        return if (current.isDirectory) null else current
     }
 
     private fun isSafeRelativePath(value: String): Boolean {

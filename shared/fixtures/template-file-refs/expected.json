@@ -1,5 +1,5 @@
 {
-  "description": "Ссылка \"file\" при type: unified_template ведёт в файл каталога templates",
+  "description": "Ссылка \"file\" при type: unified_template ведёт в файл каталога templates; путь регистрозависим во всех сегментах",
   "definitions": [
     {
       "file": "static/references/forms/forms.json",
@@ -44,6 +44,18 @@
       "anchor": "\"other.jinja2\"",
       "anchorOffset": 2,
       "targets": []
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"Items.JINJA2\"",
+      "anchorOffset": 2,
+      "targets": []
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"Nested/deep.jinja2\"",
+      "anchorOffset": 2,
+      "targets": []
     }
   ],
   "diagnostics": [
@@ -54,6 +66,16 @@
           "message": "Не удаётся разрешить файл шаблона 'absent.jinja2'",
           "line": 23,
           "rangeText": "\"absent.jinja2\""
+        },
+        {
+          "message": "Не удаётся разрешить файл шаблона 'Items.JINJA2'",
+          "line": 51,
+          "rangeText": "\"Items.JINJA2\""
+        },
+        {
+          "message": "Не удаётся разрешить файл шаблона 'Nested/deep.jinja2'",
+          "line": 58,
+          "rangeText": "\"Nested/deep.jinja2\""
         }
       ]
     }

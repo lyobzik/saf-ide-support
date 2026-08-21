@@ -44,6 +44,20 @@
           "type": "string",
           "file": "other.jinja2"
         }
+      },
+      "wrong_case": {
+        "type": "question",
+        "items": {
+          "type": "unified_template",
+          "file": "Items.JINJA2"
+        }
+      },
+      "wrong_case_dir": {
+        "type": "question",
+        "items": {
+          "type": "unified_template",
+          "file": "Nested/deep.jinja2"
+        }
       }
     }
   }
