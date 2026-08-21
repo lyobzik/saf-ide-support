@@ -1,0 +1,85 @@
+{
+  "description": "Поля резолвятся в каждой интерполяции литерала, а не только в первой",
+  "definitions": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "y={{ main_form.name",
+      "anchorOffset": 15,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "name",
+          "ordinal": 0,
+          "line": 4,
+          "rangeText": "\"name\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "\"{{ main_form.name }}-",
+      "anchorOffset": 14,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "name",
+          "ordinal": 0,
+          "line": 4,
+          "rangeText": "\"name\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "-{{ main_form.age",
+      "anchorOffset": 14,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "age",
+          "ordinal": 0,
+          "line": 7,
+          "rangeText": "\"age\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "main_form.missing",
+      "anchorOffset": 10,
+      "targets": []
+    }
+  ],
+  "references": [
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"age\"",
+      "anchorOffset": 1,
+      "includeDeclaration": false,
+      "targets": [
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 5,
+          "rangeText": "age"
+        },
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 6,
+          "rangeText": "age"
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "items": [
+        {
+          "message": "Не удаётся разрешить поле 'missing' формы 'hello_form'",
+          "line": 6,
+          "rangeText": "missing"
+        }
+      ]
+    }
+  ]
+}

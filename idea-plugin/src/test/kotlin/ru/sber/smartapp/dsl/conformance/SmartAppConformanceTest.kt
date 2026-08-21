@@ -5,8 +5,10 @@ import com.google.gson.JsonParser
 import com.intellij.json.psi.JsonFile
 import com.intellij.json.psi.JsonProperty
 import com.intellij.json.psi.JsonStringLiteral
+import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiPolyVariantReference
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import ru.sber.smartapp.dsl.SmartAppRefKind
@@ -412,34 +414,18 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
             file, offset, JsonStringLiteral::class.java, false,
         ) ?: return emptyList()
 
-        return literal.references
-            .flatMap { reference ->
-                when (reference) {
-                    is SmartAppReference -> reference.multiResolve(false).mapNotNull { it.element }
-                    else -> {
-                        // Ссылки на поля формы — поли-вариантные того же контракта.
-                        val resolved = reference.resolve()
-                        if (resolved != null) listOf(resolved) else emptyList()
-                    }
-                }
-            }
-            .ifEmpty { multiResolveFieldReferences(literal, offset) }
-    }
-
-    /**
-     * Поли-вариантный резолв ссылок на поля формы: у литерала их может быть
-     * несколько (по одной на каждое вхождение), поэтому выбирается та, чей
-     * диапазон покрывает каретку.
-     */
-    private fun multiResolveFieldReferences(literal: JsonStringLiteral, offset: Int): List<PsiElement> {
+        // Ссылок у литерала может быть несколько — по одной на каждое вхождение
+        // поля в Jinja. Резолвим только ту, чей диапазон покрывает каретку:
+        // иначе кейс отвечал бы за весь литерал целиком и не различал два
+        // вхождения в разных интерполяциях.
         val inElement = offset - literal.textRange.startOffset
         return literal.references
             .filter { it.rangeInElement.containsOffset(inElement) }
             .flatMap { reference ->
-                (reference as? com.intellij.psi.PsiPolyVariantReference)
-                    ?.multiResolve(false)
-                    ?.mapNotNull { it.element }
-                    ?: emptyList()
+                when (reference) {
+                    is PsiPolyVariantReference -> reference.multiResolve(false).mapNotNull { it.element }
+                    else -> listOfNotNull(reference.resolve())
+                }
             }
     }
 
@@ -455,6 +441,9 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
         val text = fixture.text(relative)
         val range = when (element) {
             is JsonProperty -> element.nameElement.textRange
+            // Цель-файл (шаблон): осмысленна только позиция начала файла, иначе
+            // диапазоном оказался бы весь его текст.
+            is PsiFile -> TextRange(0, 0)
             else -> element.textRange
         }
         return Described(

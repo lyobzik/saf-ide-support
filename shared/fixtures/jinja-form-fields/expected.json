@@ -1,5 +1,5 @@
 {
-  "description": "Плоский main_form.<field> резолвится; цепочки и statement-теги — нет",
+  "description": "main_form ведёт на форму, main_form.<field> — на поле: в интерполяции, в statement-теге и на первом сегменте цепочки",
   "definitions": [
     {
       "file": "static/references/scenarios/main.json",
@@ -17,9 +17,93 @@
     },
     {
       "file": "static/references/scenarios/main.json",
+      "anchor": "main_form.name }}",
+      "anchorOffset": 2,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "hello_form",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"hello_form\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "main_form.name }}",
+      "anchorOffset": 9,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "hello_form",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"hello_form\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "main_form.name }}",
+      "anchorOffset": 14,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "name",
+          "ordinal": 0,
+          "line": 4,
+          "rangeText": "\"name\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "set x = main_form",
+      "anchorOffset": 8,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "hello_form",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"hello_form\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "{{ main_form }}",
+      "anchorOffset": 3,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "hello_form",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"hello_form\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "variables.main_form",
+      "anchorOffset": 12,
+      "targets": []
+    },
+    {
+      "file": "static/references/scenarios/main.json",
       "anchor": "main_form.name.extra",
       "anchorOffset": 11,
-      "targets": []
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "name",
+          "ordinal": 0,
+          "line": 4,
+          "rangeText": "\"name\""
+        }
+      ]
     },
     {
       "file": "static/references/scenarios/main.json",
@@ -41,6 +125,11 @@
         {
           "message": "Не удаётся разрешить поле 'age' формы 'hello_form'",
           "line": 5,
+          "rangeText": "age"
+        },
+        {
+          "message": "Не удаётся разрешить поле 'age' формы 'hello_form'",
+          "line": 8,
           "rangeText": "age"
         }
       ]
@@ -64,7 +153,8 @@
         "set",
         "x",
         "main_form",
-        "age"
+        "age",
+        "main_form"
       ],
       "lines": [
         4,
@@ -80,7 +170,8 @@
         8,
         8,
         8,
-        8
+        8,
+        9
       ]
     }
   ]

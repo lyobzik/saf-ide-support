@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as vscodeMock from "../mocks/vscode";
+import { workspaceControl } from "../mocks/vscode";
+import { SmartAppWorkspace } from "../../src/vscode/workspace";
 import { SmartAppIndex } from "../../src/core/index";
 import {
   SEMANTIC_TOKEN_LEGEND,
@@ -87,6 +89,25 @@ describe("DefinitionProvider", () => {
     ).toBe('"hello_form"');
   });
 
+  it("для переменной main_form ведёт на определение формы", async () => {
+    const provider = createDefinitionProvider(workspace);
+    const locations = (await provider.provideDefinition(
+      doc(scenarioUri, scenario),
+      positionOf(scenario, "main_form.name", 2),
+      undefined as never,
+    )) as unknown as vscodeMock.Location[];
+
+    expect(locations).toHaveLength(1);
+    expect(locations[0]?.uri.toString()).toBe(formsUri);
+    expect(locations[0]?.range.start.line).toBe(1);
+    expect(
+      lineOf(forms, 1).slice(
+        locations[0]!.range.start.character,
+        locations[0]!.range.end.character,
+      ),
+    ).toBe('"hello_form"');
+  });
+
   it("для поля формы в Jinja ведёт на определение поля", async () => {
     const provider = createDefinitionProvider(workspace);
     const locations = (await provider.provideDefinition(
@@ -104,6 +125,54 @@ describe("DefinitionProvider", () => {
         locations[0]!.range.end.character,
       ),
     ).toBe('"name"');
+  });
+});
+
+describe("DefinitionProvider поверх настоящего SmartAppWorkspace", () => {
+  // Адаптерные тесты выше кормят индекс вручную. Здесь проверяется вся цепочка
+  // адаптера — findFiles -> noteFile -> findFile -> toVsLocation: файл шаблона
+  // содержимого не имеет в хранилище текстов, и ошибка в этой ветке была бы
+  // невидима и conformance-корпусу, и тестам с ручным индексом.
+  const e2eRoot = "file:///e2e/static/references";
+  const e2eFormsUri = `${e2eRoot}/forms/forms.json`;
+  const e2eTemplateUri = `${e2eRoot}/templates/items.jinja2`;
+  const e2eForms = [
+    "{",
+    '  "hello_form": {',
+    '    "type": "form",',
+    '    "fields": {',
+    '      "name": {',
+    '        "items": {',
+    '          "type": "unified_template",',
+    '          "file": "items.jinja2"',
+    "        }",
+    "      }",
+    "    }",
+    "  }",
+    "}",
+  ].join("\n");
+
+  it("ведёт в файл шаблона, найденный сканированием воркспейса", async () => {
+    workspaceControl.reset();
+    workspaceControl.files.set(e2eFormsUri, e2eForms);
+    workspaceControl.files.set(e2eTemplateUri, "{{ items }}");
+
+    const scanned = new SmartAppWorkspace();
+    await scanned.start();
+
+    const provider = createDefinitionProvider(scanned);
+    const locations = (await provider.provideDefinition(
+      doc(e2eFormsUri, e2eForms),
+      positionOf(e2eForms, '"items.jinja2"', 2),
+      undefined as never,
+    )) as unknown as vscodeMock.Location[];
+
+    expect(locations).toHaveLength(1);
+    expect(locations[0]?.uri.toString()).toBe(e2eTemplateUri);
+    // Осмысленная позиция в файле, текст которого не хранится, — только начало.
+    expect(locations[0]?.range.start.line).toBe(0);
+    expect(locations[0]?.range.start.character).toBe(0);
+    scanned.dispose();
   });
 });
 

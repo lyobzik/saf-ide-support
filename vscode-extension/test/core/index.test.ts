@@ -74,7 +74,7 @@ describe("определения", () => {
     });
     const found = definitionsAt(index, documentContext(scenarioUri, text), text.indexOf("dup"));
     expect(found).toHaveLength(2);
-    expect(found.map((d) => d.ordinal)).toEqual([0, 1]);
+    expect(found.map((d) => ("ordinal" in d ? d.ordinal : undefined))).toEqual([0, 1]);
   });
 
   it("наборы references изолированы друг от друга", () => {

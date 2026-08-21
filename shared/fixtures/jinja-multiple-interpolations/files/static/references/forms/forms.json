@@ -1,0 +1,13 @@
+{
+  "hello_form": {
+    "type": "form",
+    "fields": {
+      "name": {
+        "type": "integration"
+      },
+      "age": {
+        "type": "integration"
+      }
+    }
+  }
+}

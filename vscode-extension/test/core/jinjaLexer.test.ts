@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decode } from "../../src/core/jsonDecode";
-import { fieldCandidates, tokenize, TokenType } from "../../src/core/jinjaLexer";
+import { fieldCandidates, formVariableOccurrences, tokenize, TokenType } from "../../src/core/jinjaLexer";
 
 /**
  * Порт `SmartAppJinjaLexerTest.kt` — кейс в кейс. Лексер Jinja самая тонкая часть
@@ -147,10 +147,46 @@ describe("tokenize", () => {
   });
 });
 
+describe("formVariableOccurrences", () => {
+  it("переменная формы с полем и без", () => {
+    expect(formVariableOccurrences("{{ main_form }} {{ main_form.name }}")).toEqual([
+      { start: 3, end: 12 },
+      { start: 19, end: 28 },
+    ]);
+  });
+
+  it("в statement-теге тоже", () => {
+    expect(formVariableOccurrences("{% if main_form.a %}").map((o) => o.start)).toEqual([6]);
+  });
+
+  it("в позиции чужого поля вхождением не считается", () => {
+    expect(formVariableOccurrences("{{ variables.main_form.name }}")).toEqual([]);
+  });
+
+  it("вне выражения вхождением не считается", () => {
+    expect(formVariableOccurrences("main_form.name")).toEqual([]);
+  });
+});
+
 describe("fieldCandidates", () => {
-  it("кандидаты только из интерполяции", () => {
+  it("кандидаты и из интерполяции, и из statement-тега", () => {
     const candidates = fieldCandidates("{{ main_form.name }} {% set x = main_form.age %}");
-    expect(candidates.map((c) => c.field)).toEqual(["name"]);
+    expect(candidates.map((c) => c.field)).toEqual(["name", "age"]);
+  });
+
+  it("поле во второй интерполяции", () => {
+    // Обход не должен заканчиваться первым фрагментом.
+    expect(fieldCandidates("{{ x }} и {{ main_form.name }}").map((c) => c.field)).toEqual(["name"]);
+  });
+
+  it("кандидаты из каждой интерполяции", () => {
+    const text = "{{ main_form.a }}-{{ main_form.b }}-{{ main_form.c }}";
+    expect(fieldCandidates(text).map((c) => c.field)).toEqual(["a", "b", "c"]);
+  });
+
+  it("statement-тег между фрагментами не обрывает обход", () => {
+    const text = "{% if main_form.a %}{{ main_form.b }}{% endif %}";
+    expect(fieldCandidates(text).map((c) => c.field)).toEqual(["a", "b"]);
   });
 
   it("whitespace вокруг точки допустим", () => {
@@ -165,8 +201,10 @@ describe("fieldCandidates", () => {
     expect(fieldCandidates("{{ variables.main_form.unknown }}")).toEqual([]);
   });
 
-  it("цепочка подобъектов кандидата не даёт", () => {
-    expect(fieldCandidates("{{ main_form.name.extra }}")).toEqual([]);
+  it("цепочка даёт кандидата на первом сегменте", () => {
+    // main_form.name резолвится, а хвост .extra семантики не получает: схемы
+    // значений полей нет, резолвить `extra` не во что.
+    expect(fieldCandidates("{{ main_form.name.extra }}").map((c) => c.field)).toEqual(["name"]);
   });
 
   it("операндная позиция кандидата даёт", () => {

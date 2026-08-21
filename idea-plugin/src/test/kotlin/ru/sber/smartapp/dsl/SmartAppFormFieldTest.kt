@@ -14,6 +14,7 @@ import com.intellij.usageView.UsageViewTypeLocation
 import ru.sber.smartapp.dsl.findusages.SmartAppElementDescriptionProvider
 import ru.sber.smartapp.dsl.highlight.SmartAppTextAttributes
 import ru.sber.smartapp.dsl.reference.SmartAppFieldReference
+import ru.sber.smartapp.dsl.reference.SmartAppFormVariableReference
 
 /**
  * Интеграционные тесты поддержки полей форм и Jinja-навигации/подсветки.
@@ -128,34 +129,66 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         )
     }
 
-    fun testNoReferenceForSubobjectChain() {
-        // `{{ main_form.name.extra }}` — подобъекты main_form.x.y не разбираются:
-        // ссылки на name не создаётся.
+    fun testChainResolvesFirstSegmentOnly() {
+        // `{{ main_form.name.extra }}` — name резолвится, хвост .extra семантики
+        // не получает: схемы значений полей нет, резолвить `extra` не во что.
         val scn = addScenario("s_sub", """"g": "{{ main_form.name.extra }}"""")
+        val ref = fieldReference(scn, "g", "{{ main_form.name.extra }}")
+        assertEquals("первый сегмент цепочки резолвится", 1, ref.multiResolve(false).size)
         val literal = findLiteral(scn, "g", "{{ main_form.name.extra }}")
-        assertTrue(
-            "подобъект main_form.x.y не даёт SmartAppFieldReference",
-            literal.references.filterIsInstance<SmartAppFieldReference>().isEmpty(),
+        assertEquals(
+            "хвост цепочки собственной ссылки не получает",
+            1,
+            literal.references.filterIsInstance<SmartAppFieldReference>().size,
         )
     }
 
-    // ---- regression: statement-тег с main_form не даёт ссылки/WARNING ---
+    // ---- statement-тег: та же семантика полей, что и в интерполяции ------
 
-    fun testStatementTagWithMainFormHasNoReferenceOrWarning() {
-        // {% set x = main_form.unknown %} — statement-тег: семантика полей
-        // допустима только внутри {{ }}. Здесь нет ни ссылки, ни WARNING.
+    fun testStatementTagWithMainFormHasReferenceAndWarning() {
+        // {% set x = main_form.unknown %} — в бою обращение к полю так же часто
+        // стоит в statement-теге, поэтому семантика полей работает и здесь.
         val scn = addScenario("s_stmt", """"g": "{% set x = main_form.unknown %}"""")
         val literal = findLiteral(scn, "g", "{% set x = main_form.unknown %}")
-        assertTrue(
-            "statement-тег не должен давать SmartAppFieldReference",
-            literal.references.filterIsInstance<SmartAppFieldReference>().isEmpty(),
+        assertEquals(
+            "statement-тег даёт SmartAppFieldReference",
+            1,
+            literal.references.filterIsInstance<SmartAppFieldReference>().size,
         )
         myFixture.openFileInEditor(scn.virtualFile)
         val warnings = myFixture.doHighlighting(HighlightSeverity.WARNING)
-        assertFalse(
-            "statement-тег не должен давать WARNING о поле",
+        assertTrue(
+            "неизвестное поле в statement-теге даёт WARNING",
             warnings.any { it.description?.contains("Не удаётся разрешить поле") == true },
         )
+    }
+
+    // ---- характеризация: границы диапазона ссылки -----------------------
+
+    fun testReferenceBoundaryAtDotIsInclusive() {
+        // Характеризация платформы: диапазон токена полуоткрытый, но
+        // TextRange.containsOffset включает конец, и каретка ровно на точке
+        // после `main_form` попадает в ссылку на форму. Измеренное поведение, а
+        // не решение: ядро расширения обязано вести себя так же, иначе F12 с
+        // кареткой в конце слова сработает по-разному в двух редакторах.
+        val scn = addScenario("s_bound", """"g": "{{ main_form.name }}"""")
+        val literal = findLiteral(scn, "g", "{{ main_form.name }}")
+        val formStart = scn.text.indexOf("main_form.")
+        val dotOffset = formStart + "main_form".length
+
+        assertTrue(
+            "на самом main_form — ссылка на форму",
+            scn.findReferenceAt(formStart) is SmartAppFormVariableReference,
+        )
+        assertTrue(
+            "на имени поля — ссылка на поле",
+            scn.findReferenceAt(dotOffset + 1) is SmartAppFieldReference,
+        )
+        assertTrue(
+            "каретка на разделителе остаётся в диапазоне main_form",
+            scn.findReferenceAt(dotOffset) is SmartAppFormVariableReference,
+        )
+        assertNotNull(literal)
     }
 
     // ---- regression: закрывающий разделитель внутри Jinja-строки -------
@@ -257,14 +290,15 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         assertFalse(items.contains("name"))
     }
 
-    fun testNoFieldCompletionInsideStatementTag() {
-        // Каретка внутри {% %} — statement-тег, completion полей не активируется
-        // и не падает (regression: ранее выбрасывал исключение).
+    fun testFieldCompletionInsideStatementTag() {
+        // Каретка внутри {% %}: completion полей работает так же, как в
+        // интерполяции — слева от обращения стоит ещё и `set x = `.
         val items = completeAt(
             "static/references/scenarios/stmt.json",
             """{ "stmt": { "type": "form_filling", "form": "hello_form", "g": "{% set x = main_form.<caret> %}" } }""",
         )
-        assertFalse("statement-тег не должен давать completion полей", items.contains("name"))
+        assertTrue("completion полей в statement-теге: $items", items.contains("name"))
+        assertTrue(items.contains("age"))
     }
 
     fun testNoFieldCompletionAfterClosedInterpolation() {

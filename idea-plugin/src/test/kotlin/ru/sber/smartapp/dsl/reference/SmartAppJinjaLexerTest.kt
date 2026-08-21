@@ -132,11 +132,57 @@ class SmartAppJinjaLexerTest {
     // ---- fieldCandidates: только интерполяция ---------------------------
 
     @Test
-    fun fieldCandidatesOnlyFromInterpolation() {
-        // main_form.field внутри {{ }} — кандидат; внутри {% %} — нет.
+    fun fieldCandidatesFromInterpolationAndStatement() {
+        // main_form.field даёт кандидата и внутри {{ }}, и внутри {% %}.
         val candidates = SmartAppJinjaLexer.fieldCandidates("{{ main_form.name }} {% set x = main_form.age %}")
-        assertEquals(1, candidates.size)
-        assertEquals("name", candidates[0].field)
+        assertEquals(listOf("name", "age"), candidates.map { it.field })
+    }
+
+    // ---- вхождения переменной формы --------------------------------------
+
+    @Test
+    fun formVariableWithAndWithoutField() {
+        val ranges = SmartAppJinjaLexer.formVariableRanges("{{ main_form }} {{ main_form.name }}")
+        assertEquals(listOf(TextRange(3, 12), TextRange(19, 28)), ranges)
+    }
+
+    @Test
+    fun formVariableInsideStatementTag() {
+        val ranges = SmartAppJinjaLexer.formVariableRanges("{% if main_form.a %}")
+        assertEquals(listOf(TextRange(6, 15)), ranges)
+    }
+
+    @Test
+    fun formVariableAsNestedFieldIsNotAnOccurrence() {
+        assertTrue(SmartAppJinjaLexer.formVariableRanges("{{ variables.main_form.name }}").isEmpty())
+    }
+
+    @Test
+    fun formVariableOutsideExpressionIsNotAnOccurrence() {
+        assertTrue(SmartAppJinjaLexer.formVariableRanges("main_form.name").isEmpty())
+    }
+
+    // ---- несколько интерполяций в одном литерале ------------------------
+
+    @Test
+    fun fieldCandidateInSecondInterpolation() {
+        // Поле стоит во втором фрагменте: обход не должен заканчиваться первым.
+        val candidates = SmartAppJinjaLexer.fieldCandidates("{{ x }} и {{ main_form.name }}")
+        assertEquals(listOf("name"), candidates.map { it.field })
+    }
+
+    @Test
+    fun fieldCandidatesFromEveryInterpolation() {
+        val candidates =
+            SmartAppJinjaLexer.fieldCandidates("{{ main_form.a }}-{{ main_form.b }}-{{ main_form.c }}")
+        assertEquals(listOf("a", "b", "c"), candidates.map { it.field })
+    }
+
+    @Test
+    fun statementTagBetweenInterpolationsDoesNotStopScan() {
+        val candidates =
+            SmartAppJinjaLexer.fieldCandidates("{% if main_form.a %}{{ main_form.b }}{% endif %}")
+        assertEquals(listOf("a", "b"), candidates.map { it.field })
     }
 
     @Test
@@ -168,11 +214,11 @@ class SmartAppJinjaLexerTest {
     }
 
     @Test
-    fun subobjectChainYieldsNoCandidate() {
-        // {{ main_form.name.extra }} — подобъекты main_form.x.y не разбираются:
-        // ни ссылки на name, ни WARNING.
+    fun chainYieldsCandidateOnFirstSegment() {
+        // {{ main_form.name.extra }} — name резолвится, хвост .extra семантики
+        // не получает: схемы значений полей нет, резолвить `extra` не во что.
         val candidates = SmartAppJinjaLexer.fieldCandidates("{{ main_form.name.extra }}")
-        assertTrue(candidates.isEmpty())
+        assertEquals(listOf("name"), candidates.map { it.field })
     }
 
     @Test

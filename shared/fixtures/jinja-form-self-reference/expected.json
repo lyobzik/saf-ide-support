@@ -1,0 +1,90 @@
+{
+  "description": "Внутри файла формы main_form — это сама форма, а не форма сценария",
+  "definitions": [
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "main_form.age }}",
+      "anchorOffset": 2,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "hello_form",
+          "ordinal": 0,
+          "line": 1,
+          "rangeText": "\"hello_form\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "main_form.age",
+      "anchorOffset": 10,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "age",
+          "ordinal": 0,
+          "line": 9,
+          "rangeText": "\"age\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "main_form.age }} other",
+      "anchorOffset": 10,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "name": "age",
+          "ordinal": 0,
+          "line": 17,
+          "rangeText": "\"age\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "main_form.missing",
+      "anchorOffset": 10,
+      "targets": []
+    }
+  ],
+  "references": [
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"age\"",
+      "anchorOffset": 1,
+      "includeDeclaration": false,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "line": 6,
+          "rangeText": "age"
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "static/references/forms/forms.json",
+      "items": [
+        {
+          "message": "Не удаётся разрешить поле 'missing' формы 'hello_form'",
+          "line": 7,
+          "rangeText": "missing"
+        }
+      ]
+    }
+  ],
+  "completion": [
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "main_form.missing",
+      "anchorOffset": 10,
+      "kind": "field",
+      "items": ["name", "age"],
+      "absent": ["other_form"]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "hello_form": {
+    "type": "form",
+    "fields": {
+      "name": {
+        "type": "question",
+        "hint": "{{ main_form.age }}",
+        "unknown": "{{ main_form.missing }}"
+      },
+      "age": {
+        "type": "integration"
+      }
+    }
+  },
+  "other_form": {
+    "type": "form",
+    "fields": {
+      "age": {
+        "type": "question",
+        "hint": "{{ main_form.age }} other"
+      }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "description": "Ссылка \"file\" при type: unified_template ведёт в файл каталога templates",
+  "definitions": [
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"items.jinja2\"",
+      "anchorOffset": 2,
+      "targets": [
+        {
+          "file": "static/references/templates/items.jinja2",
+          "line": 0,
+          "column": 0,
+          "rangeText": ""
+        }
+      ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"nested/deep.jinja2\"",
+      "anchorOffset": 2,
+      "targets": [
+        {
+          "file": "static/references/templates/nested/deep.jinja2",
+          "line": 0,
+          "column": 0,
+          "rangeText": ""
+        }
+      ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"absent.jinja2\"",
+      "anchorOffset": 2,
+      "targets": []
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"../forms/forms.json\"",
+      "anchorOffset": 2,
+      "targets": []
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"other.jinja2\"",
+      "anchorOffset": 2,
+      "targets": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "static/references/forms/forms.json",
+      "items": [
+        {
+          "message": "Не удаётся разрешить файл шаблона 'absent.jinja2'",
+          "line": 23,
+          "rangeText": "\"absent.jinja2\""
+        }
+      ]
+    }
+  ]
+}

@@ -3,7 +3,11 @@
     "type": "base",
     "fields": {
       "name": {
-        "type": "question"
+        "type": "question",
+        "items": {
+          "type": "unified_template",
+          "file": "items.jinja2"
+        }
       }
     }
   }

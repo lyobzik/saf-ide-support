@@ -6,6 +6,7 @@
     "unknown": "{{ main_form.age }}",
     "chain": "{{ main_form.name.extra }}",
     "nested": "{{ variables.main_form.name }}",
-    "statement": "{% set x = main_form.age %}"
+    "statement": "{% set x = main_form.age %}",
+    "bare": "{{ main_form }}"
   }
 }

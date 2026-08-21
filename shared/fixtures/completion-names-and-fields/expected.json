@@ -46,10 +46,13 @@
       "file": "static/references/scenarios/fields.json",
       "anchor": "\"statement\": \"{% set x = main_form. %}\"",
       "anchorOffset": 35,
-      "items": [],
-      "absent": [
+      "kind": "field",
+      "items": [
         "name",
         "age"
+      ],
+      "absent": [
+        "odd.field"
       ]
     },
     {

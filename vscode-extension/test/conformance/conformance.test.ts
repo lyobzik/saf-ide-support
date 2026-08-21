@@ -253,7 +253,9 @@ describe("conformance-корпус", () => {
           // Идентичность определения: имя плюс ordinal среди одноимённых ключей.
           const withOrdinals = check.targets.filter((t) => t.ordinal !== undefined);
           if (withOrdinals.length > 0) {
-            expect(found.map((d) => ({ name: nameOf(d), ordinal: d.ordinal }))).toEqual(
+            // FileTarget (ссылка на файл) ни имени, ни ordinal не имеет —
+            // такие кейсы ordinal и не описывают.
+            expect(found.map((d) => ("ordinal" in d ? { name: nameOf(d), ordinal: d.ordinal } : d))).toEqual(
               withOrdinals.map((t) => ({ name: t.name, ordinal: t.ordinal })),
             );
           }

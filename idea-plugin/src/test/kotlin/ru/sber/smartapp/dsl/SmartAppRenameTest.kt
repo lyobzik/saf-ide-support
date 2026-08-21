@@ -58,6 +58,29 @@ class SmartAppRenameTest : BasePlatformTestCase() {
 
     // ---- R2: rename только ссылки — определение не трогается ------------
 
+    fun testRenameFormKeepsMainFormVariable() {
+        // `main_form` — псевдоним формы, а не её имя: переименование формы не
+        // должно превращать его в новое имя, хотя ссылка на форму там есть.
+        // Тест фиксирует наблюдаемое поведение, а не механизм: платформа ищет
+        // использования по слову `hello_form`, которого в этой строке нет, и до
+        // ссылки не доходит — проверено мутацией (снятие handleElementRename
+        // тест не роняет). Override остаётся страховкой на случай, если поиск
+        // использований изменится.
+        myFixture.addFileToProject(
+            "static/references/scenarios/jinja.json",
+            """{ "jinja": { "type": "form_filling", "form": "hello_form", "g": "{{ main_form }}" } }""",
+        )
+        val helloFormProp = findTopLevelProperty("static/references/forms/forms.json", "hello_form")
+
+        myFixture.renameElement(helloFormProp, "renamed_form")
+
+        val jinjaFile = findFile("static/references/scenarios/jinja.json")
+        assertNotNull(
+            "значение с main_form не должно быть переписано",
+            findLiteralSoft(jinjaFile, "g", "{{ main_form }}"),
+        )
+    }
+
     fun testRenameReferenceRewritesStringOnly() {
         myFixture.addFileToProject(
             "static/references/scenarios/consumer.json",
@@ -138,6 +161,11 @@ class SmartAppRenameTest : BasePlatformTestCase() {
             ?: error("no property '$propName' with value '$value' in ${file.name}")
         return match.value as JsonStringLiteral
     }
+
+    private fun findLiteralSoft(file: PsiFile, propName: String, value: String): JsonStringLiteral? =
+        PsiTreeUtil.findChildrenOfType(file, JsonProperty::class.java)
+            .firstOrNull { it.name == propName && (it.value as? JsonStringLiteral)?.value == value }
+            ?.value as? JsonStringLiteral
 
     private fun smartAppReference(literal: JsonStringLiteral): SmartAppReference? =
         literal.references.filterIsInstance<SmartAppReference>().firstOrNull()

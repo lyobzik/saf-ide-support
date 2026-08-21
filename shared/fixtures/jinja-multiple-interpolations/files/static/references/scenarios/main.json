@@ -1,0 +1,9 @@
+{
+  "main": {
+    "type": "form_filling",
+    "form": "hello_form",
+    "second": "x={{ greeting }} y={{ main_form.name }}",
+    "both": "{{ main_form.name }}-{{ main_form.age }}",
+    "unknown_second": "{{ main_form.age }} y={{ main_form.missing }}"
+  }
+}

@@ -83,6 +83,36 @@ describe("SmartApp DSL в VS Code", () => {
     assert.ok(locations[0]?.uri.path.endsWith("forms/forms.json"));
   });
 
+  it("переходит с main_form к определению формы", async () => {
+    const document = await openWorkspaceFile(scenarioPath);
+    const locations = await waitFor(
+      () =>
+        vscode.commands.executeCommand<vscode.Location[]>(
+          "vscode.executeDefinitionProvider",
+          document.uri,
+          positionOf(document, "main_form.name", 2),
+        ),
+      (found) => (found?.length ?? 0) > 0,
+    );
+    assert.ok(locations[0]?.uri.path.endsWith("forms/forms.json"));
+  });
+
+  it("переходит к файлу шаблона", async () => {
+    // Цель — не JSON-определение, а файл целиком, текст которого расширение не
+    // хранит: единственное место, где эта ветка проверяется в живом редакторе.
+    const document = await openWorkspaceFile(formsPath);
+    const locations = await waitFor(
+      () =>
+        vscode.commands.executeCommand<vscode.Location[]>(
+          "vscode.executeDefinitionProvider",
+          document.uri,
+          positionOf(document, '"items.jinja2"', 2),
+        ),
+      (found) => (found?.length ?? 0) > 0,
+    );
+    assert.ok(locations[0]?.uri.path.endsWith("templates/items.jinja2"));
+  });
+
   it("находит использования определения", async () => {
     const document = await openWorkspaceFile(formsPath);
     const locations = await waitFor(

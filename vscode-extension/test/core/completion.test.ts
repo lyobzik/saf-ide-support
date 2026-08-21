@@ -75,9 +75,9 @@ describe("поля формы внутри Jinja", () => {
     expect(result.items.map((i) => i.label)).toEqual(["name", "age"]);
   });
 
-  it("ничего не предлагает в statement-теге", () => {
+  it("предлагает поля и в statement-теге", () => {
     const result = at(scenarioUri, scenario("{% set x = main_form.| %}"), { [formsUri]: forms });
-    expect(result.items).toEqual([]);
+    expect(result.items.map((i) => i.label)).toEqual(["name", "age"]);
   });
 
   it("ничего не предлагает после закрытой интерполяции", () => {

@@ -20,6 +20,7 @@ const waitFor = async (condition: () => boolean, attempts = 100): Promise<void> 
 const root = "file:///w/static/references";
 const formsUri = `${root}/forms/forms.json`;
 const lateUri = `${root}/forms/late.json`;
+const templateUri = `${root}/templates/items.jinja2`;
 
 describe("SmartAppWorkspace.start", () => {
   beforeEach(() => workspaceControl.reset());
@@ -48,6 +49,48 @@ describe("SmartAppWorkspace.start", () => {
 
     const names = workspace.index.namesOfKind("FORM", "w/static/references");
     expect(names.sort()).toEqual(["early_form", "late_form"]);
+    workspace.dispose();
+  });
+
+  it("шаблон, удалённый во время сканирования, не остаётся в реестре", async () => {
+    // Не-DSL файлы попадают в реестр по факту существования, без чтения. Тот же
+    // счётчик поколений обязан отсечь файл, исчезнувший между findFiles и stat:
+    // иначе переход вёл бы в удалённый файл.
+    workspaceControl.files.set(templateUri, "{{ items }}");
+    let releaseStat = (): void => undefined;
+    workspaceControl.statGates = [
+      new Promise<void>((resolve) => {
+        releaseStat = resolve;
+      }),
+    ];
+
+    const workspace = new SmartAppWorkspace();
+    const started = workspace.start();
+    await waitFor(() => workspaceControl.stats.includes(templateUri));
+
+    // Файл исчез уже после начала проверки существования.
+    workspaceControl.files.delete(templateUri);
+    workspaceControl.watchers[0]!.deleted.fire(Uri.parse(templateUri));
+    releaseStat();
+
+    await started;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(workspace.index.findFile(["w/static/references/templates/items.jinja2"])).toBeUndefined();
+    workspace.dispose();
+  });
+
+  it("шаблон набора попадает в реестр по факту существования", async () => {
+    workspaceControl.files.set(templateUri, "{{ items }}");
+
+    const workspace = new SmartAppWorkspace();
+    await workspace.start();
+
+    expect(workspace.index.findFile(["w/static/references/templates/items.jinja2"])).toBe(
+      templateUri,
+    );
+    // Содержимое шаблона не читается: важен только факт существования.
+    expect(workspaceControl.reads).not.toContain(templateUri);
     workspace.dispose();
   });
 

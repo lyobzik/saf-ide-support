@@ -1,0 +1,50 @@
+{
+  "hello_form": {
+    "type": "form",
+    "fields": {
+      "name": {
+        "type": "question",
+        "items": {
+          "type": "unified_template",
+          "file": "items.jinja2",
+          "loader": "json"
+        }
+      },
+      "deep": {
+        "type": "question",
+        "items": {
+          "type": "unified_template",
+          "file": "nested/deep.jinja2"
+        }
+      },
+      "absent": {
+        "type": "question",
+        "items": {
+          "type": "unified_template",
+          "file": "absent.jinja2"
+        }
+      },
+      "escaping": {
+        "type": "question",
+        "items": {
+          "type": "unified_template",
+          "file": "../forms/forms.json"
+        }
+      },
+      "dynamic": {
+        "type": "question",
+        "items": {
+          "type": "unified_template",
+          "file": "{{ main_form.name }}"
+        }
+      },
+      "other_owner": {
+        "type": "question",
+        "items": {
+          "type": "string",
+          "file": "other.jinja2"
+        }
+      }
+    }
+  }
+}

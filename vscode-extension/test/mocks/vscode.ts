@@ -34,10 +34,23 @@ export class Uri {
 }
 
 export class Location {
+  readonly range: Range;
+
+  /**
+   * Настоящий `vscode.Location` принимает и `Range`, и `Position` (последняя
+   * разворачивается в пустой диапазон). Фейк обязан вести себя так же: иначе
+   * ветка перехода в файл без хранимого текста, где позиция — начало файла,
+   * падала бы только в живом редакторе.
+   */
   constructor(
     readonly uri: Uri,
-    readonly range: Range,
-  ) {}
+    rangeOrPosition: Range | Position,
+  ) {
+    this.range =
+      rangeOrPosition instanceof Position
+        ? new Range(rangeOrPosition, rangeOrPosition)
+        : rangeOrPosition;
+  }
 }
 
 export enum CompletionItemKind {
@@ -231,6 +244,9 @@ export const workspaceControl = {
   readGates: [] as Promise<void>[],
   /** URI начатых чтений — тест по ним понимает, что чтение уже стартовало. */
   reads: [] as string[],
+  /** Шлюзы и журнал для `fs.stat` — им проверяется существование не-DSL файлов. */
+  statGates: [] as Promise<void>[],
+  stats: [] as string[],
 
   reset(): void {
     this.files.clear();
@@ -238,6 +254,8 @@ export const workspaceControl = {
     this.findFilesGate = Promise.resolve();
     this.readGates = [];
     this.reads = [];
+    this.statGates = [];
+    this.stats = [];
     workspace.textDocuments = [];
   },
 };
@@ -264,6 +282,17 @@ Object.assign(workspace, {
       if (gate !== undefined) await gate;
       if (text === undefined) throw new Error(`нет файла ${uri.toString()}`);
       return new TextEncoder().encode(text);
+    },
+
+    async stat(uri: Uri): Promise<{ type: number }> {
+      // Существование фиксируется на момент вызова — как у настоящего fs,
+      // где промис резолвится позже уже снятого состояния.
+      const exists = workspaceControl.files.has(uri.toString());
+      workspaceControl.stats.push(uri.toString());
+      const gate = workspaceControl.statGates.shift();
+      if (gate !== undefined) await gate;
+      if (!exists) throw new Error(`нет файла ${uri.toString()}`);
+      return { type: 1 };
     },
   },
 
