@@ -19,8 +19,12 @@ JSON-парсера редактора**. Возможности (одинако
 - поиск использований (Find Usages / Alt+F7);
 - автодополнение значений `type` и ссылочных ключей;
 - подсветка неразрешённых ссылок (severity **WARNING**);
-- навигация, автодополнение и подсветка полей форм в Jinja-интерполяциях
-  `{{ main_form.<field> }}` (scope — только плоский доступ к полю).
+- навигация, автодополнение и подсветка полей форм в Jinja-выражениях
+  `{{ main_form.<field> }}` и `{% … main_form.<field> … %}`; у цепочки
+  `main_form.a.b` семантику получает только первый сегмент;
+- переход с самой переменной `main_form` на определение целевой формы;
+- переход к файлу шаблона: `"file"` при `"type": "unified_template"` ведёт в
+  `static/references/templates/<значение>`.
 
 ## Монорепозиторий и два контракта
 
@@ -37,7 +41,7 @@ tools/              # генератор словаря
 
 | Контракт | Артефакт | Проверка |
 |---|---|---|
-| Данные: виды, каталоги, сегменты пути, ссылочные правила, ключи контекста `type`, структурные ключи, `form`/`fields`, `main_form`, словарь | `shared/rules/rules.json`, `shared/keywords/keywords.json` (+ схемы) | `:idea-plugin:exportRules --check`, `generate_keywords.py --check`, `npm run verify:contract` |
+| Данные: виды, каталоги, сегменты пути, ссылочные правила (включая файловые), ключи контекста `type`, структурные ключи, `form`/`fields`, `main_form`, словарь | `shared/rules/rules.json`, `shared/keywords/keywords.json` (+ схемы) | `:idea-plugin:exportRules --check`, `generate_keywords.py --check`, `npm run verify:contract` |
 | Поведение: резолв, диагностика, completion, Jinja, изоляция наборов, строгость индексации | `shared/fixtures/**` | `SmartAppConformanceTest` (Kotlin) и `test/conformance` (TS) на одном корпусе |
 
 Правила работы с контрактом:
@@ -48,7 +52,10 @@ tools/              # генератор словаря
 - `contractVersion` живёт в `SmartAppContract.VERSION` и увеличивается при любом
   **несовместимом** изменении структуры данных; синхронно правятся `const` в
   `shared/rules/rules.schema.json` и `EXPECTED_CONTRACT_VERSION` в
-  `vscode-extension/src/core/contract.ts`.
+  `vscode-extension/src/core/contract.ts`. Четвёртого места нет:
+  `scripts/verify-contract.mjs` читает версию из `contract.ts`, а не хранит
+  собственную копию — раньше хранил, и синхронный бамп трёх мест всё равно
+  ронял сборку.
 - Новая семантика **без нового кейса в `shared/fixtures` не принимается**: общий
   `rules.json` фиксирует данные, но не алгоритмы.
 - В `vscode-extension/src/core/**` не должно быть литералов DSL-имён
@@ -75,6 +82,7 @@ tools/              # генератор словаря
 | `SmartAppFiles` | Определяет, является ли JSON-файл DSL-файлом, и его `RefKind` по пути `static/references/<kind>/` |
 | `SmartAppKeywords` | Ленивая загрузка `keywords.json`; запросы `isKeyword(category, value)` / `all(category)` |
 | `highlight/SmartAppTextAttributes` | Ключи цветовых атрибутов (`SMARTAPP_KEYWORD`, `SMARTAPP_FIELD`, `SMARTAPP_JINJA_*`) |
+| `resources/colorSchemes/SmartApp{Default,Darcula}.xml` | Цвета по умолчанию (`additionalTextAttributes`): без них подсветка Jinja не видна |
 | `highlight/SmartAppColorSettingsPage` | Страница «SmartApp DSL» в Settings → Color Scheme |
 | `annotator/SmartAppAnnotator` | `DumbAware`-аннотатор: подсветка по PSI (включая токены Jinja) + WARNING на битых ссылках и неразрешённых полях форм (ветки с индексом под dumb-guard) |
 | `SmartAppTypeContext` | Категория ключевых слов `type` по PSI-контексту (общая для completion и подсветки); `fields`→`field_description`, action-контейнеры→`action`, `requirement` внутри `fields`→`field_requirement` |
@@ -85,14 +93,16 @@ tools/              # генератор словаря
 | `index/SmartAppFormFieldNameIndex` | Ключ = имя формы, value = имена её полей; для completion полей в Jinja |
 | `index/SmartAppDefinitionValue` + `…Externalizer` | Значение индекса определений и его var-int сериализация (версия в `getVersion()`) |
 | `reference/SmartAppRefRules` | Замороженная таблица правил «условие на узел → target kind(s)» |
+| `reference/SmartAppFileRefRules` + `SmartAppFileReference` | Файловые ссылки (`"file"` при `unified_template`): резолв по пути в каталоге `templates`, без индекса |
 | `reference/SmartAppReference` | `PsiPolyVariantReferenceBase`, резолв через индекс (под dumb-guard) |
-| `reference/SmartAppReferenceContributor` | Навешивает ссылки на `JsonStringLiteral` (только значения JSON, не ключи): кросс-ссылки и ссылки на поля форм в `{{ main_form.<field> }}` |
-| `reference/SmartAppJinjaLexer` | Детерминированный лексер Jinja-фрагментов внутри строкового литерала (по decoded-тексту); `fieldCandidates` — только плоский `main_form.<field>` внутри `{{ }}` (цепочки не разбираются) |
+| `reference/SmartAppReferenceContributor` | Навешивает ссылки на `JsonStringLiteral` (только значения JSON, не ключи): кросс-ссылки, ссылки на поля форм и на саму переменную `main_form` в выражениях Jinja |
+| `reference/SmartAppJinjaLexer` | Детерминированный лексер Jinja-фрагментов внутри строкового литерала (по decoded-тексту); `fieldCandidates`/`formVariableRanges` работают и в `{{ }}`, и в `{% %}`, у цепочки берётся первый сегмент |
 | `reference/JsonStringLiteralDecoder` | decoded-текст литерала (раскрытые JSON escape) + карта `decoded→raw` смещений для трансляции диапазонов |
 | `reference/SmartAppFieldRef` + `FormFieldRefDescriptor` | `FormFieldRef(form, field)` — типизированный ключ поля (FIELD не расширяет `SmartAppRefKind`); `targetFormOf` / `isFieldDefinition` |
 | `reference/SmartAppFieldReference` | Поли-вариантная ссылка на поле формы; диапазон только на имя поля |
-| `completion/SmartAppCompletionContributor` | `DumbAware`-автодополнение ключевых слов, имён сущностей и полей формы в `{{ main_form.<caret> }}` (только identifier-имена) |
-| `findusages/SmartAppFindUsagesProvider` + `…ElementDescriptionProvider` | Find Usages для определений и полей форм (подпись `<form>.<field>`), человекочитаемые подписи |
+| `reference/SmartAppFormVariableReference` | Ссылка с переменной `main_form` на определение целевой формы |
+| `completion/SmartAppCompletionContributor` | `DumbAware`-автодополнение ключевых слов, имён сущностей и полей формы после `main_form.<caret>` в любом выражении Jinja — `{{ }}` и `{% %}` (только identifier-имена) |
+| `findusages/SmartAppFindUsagesProvider` + `…ElementDescriptionProvider` | Find Usages для определений и полей форм (подпись `<form>.<field>`); вхождения псевдонима `main_form` в список не входят — имени формы в тексте нет |
 | `rename/SmartAppRenameProcessor` | Ограничивает rename ссылками плагина в своём наборе `references`: иначе платформа переписывает одноимённые ключи чужих наборов |
 | `contract/SmartAppContract` + `SmartAppSpecs` | Таблицы данных DSL (виды, ссылочные правила, ключи контекста, структурные ключи, пути, `main_form`) — их использует рантайм и сериализует экспортёр |
 | `contract/ExportRules` | Сериализация тех же таблиц в `shared/rules/rules.json`; режим `--check` для CI |
@@ -105,9 +115,9 @@ tools/              # генератор словаря
 | `core/files.ts`, `core/refKind.ts` | `kindOf`/`referencesRoot` по URI; каталоги и виды — из контракта |
 | `core/ast.ts` | Обёртки над `jsonc-parser` вместо PSI-навигации |
 | `core/jsonDecode.ts`, `core/jinjaLexer.ts` | Порты `JsonStringLiteralDecoder` и `SmartAppJinjaLexer` (1:1) |
-| `core/refRules.ts`, `core/typeContext.ts`, `core/fieldRef.ts` | Порты одноимённых Kotlin-объектов |
+| `core/refRules.ts`, `core/fileRefRules.ts`, `core/typeContext.ts`, `core/fieldRef.ts` | Порты одноимённых Kotlin-объектов |
 | `core/indexGate.ts` | Строгость индексации — эквивалент `JsonPsi.hasError` |
-| `core/index.ts` | Воркспейс-индекс вместо четырёх `FileBasedIndex` + обратный индекс использований |
+| `core/index.ts` | Воркспейс-индекс вместо четырёх `FileBasedIndex`, обратный индекс использований и реестр не-DSL файлов набора (для файловых ссылок) |
 | `core/semantics.ts`, `core/completion.ts`, `core/semanticTokens.ts`, `core/rename.ts` | Резолв, диагностика, автодополнение, подсветка, переименование — всё в смещениях |
 | `vscode/workspace.ts` | `findFiles`, watcher, дебаунс, хранилище текстов; кормит ядро через `upsert`/`remove` |
 | `vscode/providers.ts`, `vscode/positions.ts` | Провайдеры VS Code и трансляция смещений в `Position` |
@@ -264,11 +274,37 @@ docs/plans/, docs/insights/, arch/, mds/           # материалы для A
   (сохраняет дубли); `findProperty()` их схлопывает — навигация строится по
   сохранённым offset'ам (`multiResolve` отдаёт все).
 - **Jinja-значения:** прямые ссылки на сущности из значений с `{{`/`{%` не
-  создаются (динамические шаблоны — не «битая ссылка»), но внутри интерполяций
-  `{{ … }}` работает семантика полей форм: `{{ main_form.<field> }}` резолвится,
-  дополняется и подсвечивается (WARNING при известной форме). Scope — только
-  плоский `main_form.<field>`: цепочки (`variables.main_form.x`, `main_form.x.y`)
-  и statement-теги `{% … %}` семантики не получают.
+  создаются (динамические шаблоны — не «битая ссылка»), но внутри выражений
+  Jinja работает семантика полей форм: `main_form.<field>` резолвится,
+  дополняется и подсвечивается (WARNING при известной форме) и в интерполяциях
+  `{{ … }}`, и в statement-тегах `{% … %}` — в бою обращение к полю одинаково
+  часто стоит в `{% if … %}`. Границы: у цепочки `main_form.a.b` семантику
+  получает только первый сегмент (`a`), хвост — нет, потому что схемы значений
+  полей не существует; `main_form` в позиции чужого поля
+  (`variables.main_form.x`) семантики не получает вовсе.
+- **Целевая форма зависит от вида файла:** в сценарии её называет top-level
+  свойство `form`, в файле формы `main_form` — это само top-level определение,
+  внутри которого стоит литерал.
+- **`main_form` — псевдоним, а не имя.** С переменной работает переход на
+  определение формы, но её имени в тексте нет: переименование формы эту строку
+  не переписывает, в Find Usages формы она не попадает (платформа ищет по
+  слову-имени, которого здесь нет), и неразрешённая форма здесь не
+  подсвечивается — об этом уже сообщает диагностика на самом значении `form`.
+- **Ссылка на файл — отдельный вид правила.** `SmartAppSpecs.fileRefRules`
+  (`"file"` при `"type": "unified_template"`) резолвится по пути внутри набора
+  `references`, а не через индекс определений, поэтому dumb-guard ей не нужен.
+  Значение содержит расширение, вложенные пути допускаются, а выход за пределы
+  каталога (`..`, ведущий `/`) цели не даёт и **ошибкой не считается**.
+  Происхождение правила: ключа `file` нет в публичных исходниках фреймворка —
+  правило выведено из раскладки эталонного приложения (см. комментарий в
+  `SmartAppContract.kt`).
+- **Подсветка обязана быть видимой.** Наследоваться от `BRACES`/`DOT`/
+  `OPERATION_SIGN` нельзя: в схемах платформы у них нет своего цвета, а
+  silent-аннотация при этом перекрывает цвет строки JSON — фрагмент Jinja
+  становится неотличим от обычного текста. Цвета по умолчанию везёт плагин
+  (`resources/colorSchemes/`), в VS Code роль дефолта играет список
+  fallback-scope'ов. И то и другое проверяется тестами
+  (`SmartAppColorSchemesTest`, тест манифеста).
 - **Jinja-лексер по decoded-тексту** (`JsonStringLiteralDecoder`): JSON escape
   раскрываются до лексинга, диапазоны токенов транслируются в документ картой
   `decoded→raw`. Completion определяет контекст каретки тем же лексером и
