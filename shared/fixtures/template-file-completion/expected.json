@@ -1,0 +1,35 @@
+{
+  "description": "Имена файлов шаблонов дополняются и не выходят за пределы своего набора references",
+  "completion": [
+    {
+      "file": "app_a/static/references/forms/forms.json",
+      "anchor": "\"file\": \"\"",
+      "anchorOffset": 9,
+      "kind": "file",
+      "items": [
+        "items.jinja2",
+        "nested/deep.jinja2",
+        "shared.jinja2"
+      ],
+      "absent": [
+        "only_b.jinja2",
+        "nested",
+        "forms.json"
+      ]
+    },
+    {
+      "file": "app_b/static/references/forms/forms.json",
+      "anchor": "\"file\": \"\"",
+      "anchorOffset": 9,
+      "kind": "file",
+      "items": [
+        "only_b.jinja2",
+        "shared.jinja2"
+      ],
+      "absent": [
+        "items.jinja2",
+        "nested/deep.jinja2"
+      ]
+    }
+  ]
+}

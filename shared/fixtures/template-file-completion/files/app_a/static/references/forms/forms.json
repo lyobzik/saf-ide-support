@@ -1,14 +1,6 @@
 {
   "hello_form": {
-    "type": "base",
     "fields": {
-      "name": {
-        "type": "question",
-        "items": {
-          "type": "unified_template",
-          "file": "items.jinja2"
-        }
-      },
       "greeting": {
         "type": "question",
         "items": {

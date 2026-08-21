@@ -144,6 +144,26 @@ describe("SmartApp DSL в VS Code", () => {
     assert.ok(labels.includes("hello_form"), `в списке нет hello_form: ${labels.join(", ")}`);
   });
 
+  it("предлагает имена файлов шаблонов в позиции file", async () => {
+    // До этой ветки VS Code показывал здесь word-based suggestions — слова из
+    // документа. Проверяем в живом редакторе: варианты наши.
+    const document = await openWorkspaceFile(formsPath);
+    const list = await waitFor(
+      () =>
+        vscode.commands.executeCommand<vscode.CompletionList>(
+          "vscode.executeCompletionItemProvider",
+          document.uri,
+          positionOf(document, '"file": ""', 9),
+        ),
+      (found) => (found?.items.length ?? 0) > 0,
+    );
+    const labels = list.items.map((item) =>
+      typeof item.label === "string" ? item.label : item.label.label,
+    );
+    assert.ok(labels.includes("items.jinja2"), `в списке нет items.jinja2: ${labels.join(", ")}`);
+    assert.ok(labels.includes("other.jinja2"), `в списке нет other.jinja2: ${labels.join(", ")}`);
+  });
+
   it("отдаёт семантические токены по зарегистрированной легенде", async () => {
     const document = await openWorkspaceFile(scenarioPath);
     const tokens = await waitFor(

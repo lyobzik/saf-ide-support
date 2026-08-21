@@ -216,6 +216,51 @@ describe("CompletionItemProvider", () => {
   });
 });
 
+describe("CompletionItemProvider для файлов шаблонов", () => {
+  const formsWithFile = [
+    "{",
+    '  "hello_form": {',
+    '    "fields": {',
+    '      "greeting": {',
+    '        "items": {',
+    '          "type": "unified_template",',
+    '          "file": "nes"',
+    "        }",
+    "      }",
+    "    }",
+    "  }",
+    "}",
+  ].join("\n");
+
+  const fileWorkspace = (() => {
+    const index = new SmartAppIndex();
+    index.upsert(formsUri, formsWithFile);
+    index.upsert(`${root}/templates/items.jinja2`, "");
+    index.upsert(`${root}/templates/nested/deep.jinja2`, "");
+    index.markReady();
+    return { index, textOf: (uri: string) => (uri === formsUri ? formsWithFile : undefined) } as never;
+  })();
+
+  it("заменяет всё содержимое литерала и помечает вариант как файл", async () => {
+    const provider = createCompletionProvider(fileWorkspace);
+    const items = (await provider.provideCompletionItems(
+      doc(formsUri, formsWithFile),
+      positionOf(formsWithFile, '"nes"', 4),
+      undefined as never,
+      undefined as never,
+    )) as unknown as vscodeMock.CompletionItem[];
+
+    expect(items.map((i) => i.label).sort()).toEqual(["items.jinja2", "nested/deep.jinja2"]);
+    // Диапазон обязан покрывать уже набранное: вставка поверх части текста дала
+    // бы "nesnested/deep.jinja2", и корпус этого не увидит — он сверяет состав.
+    const range = items[0]?.range as vscodeMock.Range;
+    expect(range.end.character - range.start.character).toBe(3);
+    expect(lineOf(formsWithFile, range.start.line).slice(range.start.character, range.end.character))
+      .toBe("nes");
+    expect(items[0]?.kind).toBe(vscodeMock.CompletionItemKind.File);
+  });
+});
+
 describe("DocumentSemanticTokensProvider", () => {
   it("отдаёт токены в координатах строк, а не смещений", async () => {
     const provider = createSemanticTokensProvider();

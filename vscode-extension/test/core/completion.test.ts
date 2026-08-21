@@ -101,3 +101,57 @@ describe("поля формы внутри Jinja", () => {
     expect(result.items).toEqual([]);
   });
 });
+
+describe("имена файлов шаблонов", () => {
+  const templates = {
+    [`${root}/templates/items.jinja2`]: "",
+    [`${root}/templates/nested/deep.jinja2`]: "",
+  };
+  const form = (value: string) =>
+    `{ "f": { "fields": { "g": { "items": { "type": "unified_template", "file": "${value}" } } } } }`;
+
+  it("предлагает пути каталога шаблонов, включая вложенные", () => {
+    const result = at(formsUri, form("|"), templates);
+    expect(result.kind).toBe("file");
+    expect(result.items.map((i) => i.label).sort()).toEqual([
+      "items.jinja2",
+      "nested/deep.jinja2",
+    ]);
+    expect(result.items.every((i) => i.detail === "file")).toBe(true);
+  });
+
+  it("заменяет всё содержимое литерала, чтобы редактор фильтровал и по слэшу", () => {
+    const source = form("nested/|");
+    const result = at(formsUri, source, templates);
+    const text = source.replace("|", "");
+    expect(text.slice(result.replaceStart, result.replaceEnd)).toBe("nested/");
+  });
+
+  it("другой type владельца — не файловая ссылка", () => {
+    const result = at(
+      formsUri,
+      '{ "f": { "fields": { "g": { "items": { "type": "string", "file": "|" } } } } }',
+      templates,
+    );
+    expect(result.items).toEqual([]);
+  });
+
+  it("динамическое имя предложений не даёт", () => {
+    const result = at(formsUri, form("{{ x.| }}"), templates);
+    expect(result.items).toEqual([]);
+  });
+
+  it("до готовности индекса вариантов нет", () => {
+    // Реестр наполняется в ходе первичного сканирования: частичный список молча
+    // изменился бы под пользователем. В плагине IDEA гейта нет — там источник
+    // (VFS) полон всегда, и это закреплено отдельным тестом.
+    const source = form("|");
+    const offset = source.indexOf("|");
+    const text = source.slice(0, offset) + source.slice(offset + 1);
+    const notReady = new SmartAppIndex();
+    for (const [uri, content] of Object.entries({ ...templates, [formsUri]: text })) {
+      notReady.upsert(uri, content);
+    }
+    expect(completionAt(notReady, documentContext(formsUri, text), offset).items).toEqual([]);
+  });
+});

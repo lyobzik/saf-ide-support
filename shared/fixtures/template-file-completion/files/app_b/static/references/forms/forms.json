@@ -1,0 +1,13 @@
+{
+  "other_form": {
+    "fields": {
+      "greeting": {
+        "type": "question",
+        "items": {
+          "type": "unified_template",
+          "file": ""
+        }
+      }
+    }
+  }
+}
