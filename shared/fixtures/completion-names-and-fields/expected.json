@@ -64,6 +64,120 @@
         "name",
         "age"
       ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"{% if main_form. %}\"",
+      "anchorOffset": 17,
+      "kind": "field",
+      "items": [
+        "name",
+        "age"
+      ],
+      "absent": [
+        "odd.field"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"{% for i in main_form. %}\"",
+      "anchorOffset": 23,
+      "kind": "field",
+      "items": [
+        "name",
+        "age"
+      ],
+      "absent": [
+        "odd.field"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"{{  }}\"",
+      "anchorOffset": 4,
+      "kind": "variable",
+      "items": [
+        "main_form"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"{% if  %}\"",
+      "anchorOffset": 7,
+      "kind": "variable",
+      "items": [
+        "main_form"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"{{ variables. }}\"",
+      "anchorOffset": 14,
+      "items": [],
+      "absent": [
+        "main_form",
+        "name",
+        "age"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"{{ x |  }}\"",
+      "anchorOffset": 8,
+      "items": [],
+      "absent": [
+        "main_form",
+        "name",
+        "age"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"{% if not main_form. %}\"",
+      "anchorOffset": 21,
+      "kind": "field",
+      "items": [
+        "name",
+        "age"
+      ],
+      "absent": [
+        "odd.field"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"{% if a and main_form. %}\"",
+      "anchorOffset": 23,
+      "kind": "field",
+      "items": [
+        "name",
+        "age"
+      ],
+      "absent": [
+        "odd.field"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"{{ f(a, main_form.) }}\"",
+      "anchorOffset": 19,
+      "kind": "field",
+      "items": [
+        "name",
+        "age"
+      ],
+      "absent": [
+        "odd.field"
+      ]
+    },
+    {
+      "file": "static/references/scenarios/fields.json",
+      "anchor": "\"{{ f(a, ) }}\"",
+      "anchorOffset": 9,
+      "kind": "variable",
+      "items": [
+        "main_form"
+      ]
     }
   ]
 }

@@ -5,7 +5,9 @@ import com.intellij.codeInsight.completion.CompletionParameters
 import com.intellij.codeInsight.completion.CompletionProvider
 import com.intellij.codeInsight.completion.CompletionResultSet
 import com.intellij.codeInsight.completion.CompletionType
+import com.intellij.codeInsight.completion.InsertHandler
 import com.intellij.codeInsight.completion.PrioritizedLookupElement
+import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.lookup.LookupElementBuilder
 import com.intellij.json.psi.JsonProperty
 import com.intellij.json.psi.JsonStringLiteral
@@ -19,6 +21,7 @@ import ru.sber.smartapp.dsl.SmartAppKeywords
 import ru.sber.smartapp.dsl.SmartAppRefKind
 import ru.sber.smartapp.dsl.SmartAppScopes
 import ru.sber.smartapp.dsl.SmartAppTypeContext
+import ru.sber.smartapp.dsl.contract.JinjaSpec
 import ru.sber.smartapp.dsl.contract.TypeContextSpec
 import ru.sber.smartapp.dsl.index.SmartAppNameIndex
 import ru.sber.smartapp.dsl.index.SmartAppFormFieldNameIndex
@@ -79,7 +82,7 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         // предложит формы в позиции, где ожидается имя поля. Jinja может стоять
         // и в элементе массива, поэтому ветка не требует JsonProperty.
         if (SmartAppReferenceContributor.isJinja(literal.value)) {
-            addFieldVariants(literal, fileKind, parameters.originalFile, parameters, result)
+            addJinjaVariants(literal, fileKind, parameters.originalFile, parameters, result)
             return
         }
 
@@ -112,8 +115,9 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
 
         for (keyword in keywords) {
             result.addElement(
-                PrioritizedLookupElement.withPriority(
+                marked(
                     LookupElementBuilder.create(keyword).withTypeText("type"),
+                    SmartAppCompletionKind.KEYWORD,
                     KEYWORD_PRIORITY,
                 ),
             )
@@ -121,15 +125,19 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
     }
 
     /**
-     * Имена полей формы для автодополнения внутри `{{ main_form.<caret> }}`.
+     * Автодополнение внутри выражения Jinja:
+     *  - после `main_form.<caret>` — имена полей целевой формы;
+     *  - на месте самого идентификатора (`{% if mai<caret> %}`) — переменная формы.
+     *
      * Целевая форма определяется через [SmartAppFieldRef.targetFormOf]; если форма
-     * неизвестна (динамический `form`) — варианты не предлагаются.
+     * неизвестна (динамический `form`) — вариантов нет ни там, ни там: имя без
+     * известной формы — вариант без семантики.
      *
      * [fileKind]/[originalFile] берутся снаружи, т.к. `targetFormOf`/scope опираются
      * на реальный путь файла, а completion работает на in-memory копии, этот путь
      * теряющей.
      */
-    private fun addFieldVariants(
+    private fun addJinjaVariants(
         literal: JsonStringLiteral,
         fileKind: SmartAppRefKind,
         originalFile: PsiFile,
@@ -164,10 +172,28 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         // именно хвост, а не всё выражение: в statement-теге слева от обращения
         // стоит ещё и `set x = `.
         val afterOpen = decoded.text.substring(exprOpenEnd, decodedCaret)
-        if (!MAIN_FORM_TAIL.containsMatchIn(afterOpen)) return
+        val fields = MAIN_FORM_TAIL.containsMatchIn(afterOpen)
+        if (!fields && !VARIABLE_TAIL.containsMatchIn(afterOpen)) return
 
         val form = SmartAppFieldRef.targetFormOf(literal, fileKind) ?: return
         val scope = SmartAppScopes.forPsiFile(originalFile)
+
+        if (!fields) {
+            // Каретка стоит на самом идентификаторе: предлагаем переменную формы.
+            // Подпись — имя целевой формы: из текста её не видно, а именно она
+            // решает, какие поля будут дальше.
+            val prefix = IDENTIFIER_TAIL.find(decoded.text.substring(0, decodedCaret))?.value ?: ""
+            result.withPrefixMatcher(prefix).addElement(
+                marked(
+                    LookupElementBuilder.create(JinjaSpec.formVariable)
+                        .withTypeText(form)
+                        .withInsertHandler(REPLACE_IDENTIFIER_TAIL),
+                    SmartAppCompletionKind.VARIABLE,
+                    FIELD_PRIORITY,
+                ),
+            )
+            return
+        }
         // Prefix перед кареткой — содержимое после последней точки в `main_form.`,
         // иначе платформа отфильтрует варианты по всему `main_form.` и они не
         // совпадут с именами полей. Пробел после точки в идентификатор не входит.
@@ -180,8 +206,11 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
             // синтаксис доступа к таким полям — отдельное проектирование).
             if (!isLexerIdentifier(field)) continue
             fieldResult.addElement(
-                PrioritizedLookupElement.withPriority(
-                    LookupElementBuilder.create(field).withTypeText("field"),
+                marked(
+                    LookupElementBuilder.create(field)
+                        .withTypeText("field")
+                        .withInsertHandler(REPLACE_IDENTIFIER_TAIL),
+                    SmartAppCompletionKind.FIELD,
                     FIELD_PRIORITY,
                 ),
             )
@@ -212,8 +241,9 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         for (path in SmartAppTemplateFiles.pathsIn(root, SmartAppFileRefRules.searchDirs(literal))) {
             if (!SmartAppFileRefRules.isOfferablePath(path)) continue
             fileResult.addElement(
-                PrioritizedLookupElement.withPriority(
+                marked(
                     LookupElementBuilder.create(path).withTypeText("file"),
+                    SmartAppCompletionKind.FILE,
                     FILE_PRIORITY,
                 ),
             )
@@ -303,13 +333,29 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         for (kind in kinds) {
             for (name in SmartAppNameIndex.allNames(project, kind, scope)) {
                 result.addElement(
-                    PrioritizedLookupElement.withPriority(
+                    marked(
                         LookupElementBuilder.create(name).withTypeText(kind.name.lowercase()),
+                        SmartAppCompletionKind.NAME,
                         NAME_PRIORITY,
                     ),
                 )
             }
         }
+    }
+
+    /**
+     * Вариант с приоритетом и видом. Вид — часть контракта поведения (`kind` в
+     * корпусе): без него обе реализации могут предложить одинаковые метки,
+     * означающие разное, и общий прогон этого не заметит.
+     */
+    private fun marked(
+        builder: LookupElementBuilder,
+        kind: SmartAppCompletionKind,
+        priority: Double,
+    ): LookupElement {
+        val element = PrioritizedLookupElement.withPriority(builder, priority)
+        element.putUserData(SmartAppCompletionKind.KEY, kind)
+        return element
     }
 
     private companion object {
@@ -319,16 +365,50 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         const val FILE_PRIORITY = 40.0
 
         // Хвост выражения перед кареткой, открывающий completion имени поля:
-        // `main_form`, опциональные пробелы, точка, опциональный частичный
+        // переменная формы, опциональные пробелы, точка, опциональный частичный
         // идентификатор (первый символ — identifierStart, как у VAR лексера) и
-        // конец. Слева от `main_form` — начало выражения либо ближайший непробельный
-        // символ, не входящий в идентификатор и не точка: `variables.main_form.`
-        // и `variables. main_form.` — обращение к чужому полю, `xmain_form.` —
-        // вообще другое имя. Хвост `x.` (цепочка) и `2` (не-идентификатор)
-        // completion не открывают.
+        // конец. Проверяется именно хвост: слева в выражении стоит ещё и `if `,
+        // `set x = `, `not ` и т.п.
+        //
+        // Слева от переменной допустимо: начало выражения; любой символ, не
+        // входящий в идентификатор и не точка (`(`, `,`, `=`); пробел, перед
+        // которым нет точки. Исключение — `|`: после него Jinja ждёт имя
+        // фильтра, а не значение. Отвергаются `variables.main_form.` и
+        // `variables. main_form.` (чужое поле) и `xmain_form.` (другое имя).
+        // Пробел без этого разбора отвергать нельзя: `{% if main_form.<caret> %}`
+        // — обычнейшая позиция в бою, и именно она не работала.
+        //
+        // Хвост `x.` (цепочка) и `2` (не-идентификатор) completion не открывают.
         val MAIN_FORM_TAIL: Regex = Regex(
-            """(?:^|[^\p{javaJavaIdentifierPart}.\s])\s*main_form\s*\.\s*""" +
+            """(?:^|[^\p{javaJavaIdentifierPart}.\s|]|(?<![.\s|])\s)\s*""" +
+                Regex.escape(JinjaSpec.formVariable) +
+                """\s*\.\s*(?:\p{javaJavaIdentifierStart}\p{javaJavaIdentifierPart}*)?$""",
+        )
+
+        // Хвост, открывающий completion самой переменной формы: начатый (возможно
+        // пустой) идентификатор, перед которым нет точки. Левая граница — та же,
+        // что у поля: `variables.mai` и `variables. mai` — чужой объект, а
+        // `x | mai` — позиция имени фильтра.
+        val VARIABLE_TAIL: Regex = Regex(
+            """(?:^|[^\p{javaJavaIdentifierPart}.\s|]|(?<![.\s|])\s)\s*""" +
                 """(?:\p{javaJavaIdentifierStart}\p{javaJavaIdentifierPart}*)?$""",
         )
+
+        /** Набранное начало идентификатора непосредственно перед кареткой. */
+        val IDENTIFIER_TAIL: Regex = Regex("""\p{javaJavaIdentifierPart}*$""")
+
+        /**
+         * Вставка заменяет слово целиком: хвост идентификатора справа от каретки
+         * удаляется. Каретка посреди слова — обычное дело (`main_|form`), и без
+         * этого получилось бы `main_formform`. В расширении ту же роль играет
+         * диапазон замены варианта, так что поведение совпадает.
+         */
+        val REPLACE_IDENTIFIER_TAIL = InsertHandler<LookupElement> { context, _ ->
+            val document = context.document
+            val text = document.charsSequence
+            var end = context.tailOffset
+            while (end < document.textLength && text[end].isJavaIdentifierPart()) end++
+            if (end > context.tailOffset) document.deleteString(context.tailOffset, end)
+        }
     }
 }

@@ -102,6 +102,99 @@ describe("поля формы внутри Jinja", () => {
   });
 });
 
+describe("позиция main_form в выражении", () => {
+  // Слева от обращения к полю почти всегда стоит ключевое слово Jinja, а не
+  // присваивание: `{% if main_form.x %}` — самая частая форма в бою. Пока
+  // проверялся только `{% set x = … %}`, пробел после слова гасил completion.
+  const fields = (jinja: string) =>
+    at(scenarioUri, `{ "s": { "form": "hello_form", "a": "${jinja}" } }`, { [formsUri]: forms })
+      .items.map((i) => i.label);
+
+  it.each([
+    ["{{ main_form.| }}", true],
+    ["{% set x = main_form.| %}", true],
+    ["{% if main_form.| %}", true],
+    ["{% if not main_form.| %}", true],
+    ["{% for i in main_form.| %}", true],
+    ["{% if a and main_form.| %}", true],
+    ["{{ f(main_form.|) }}", true],
+    ["{{ f(a, main_form.|) }}", true],
+    ["{{ variables.main_form.| }}", false],
+    ["{{ variables. main_form.| }}", false],
+    ["{{ xmain_form.| }}", false],
+  ])("%s -> %s", (jinja, offered) => {
+    expect(fields(jinja as string).includes("name")).toBe(offered);
+  });
+});
+
+describe("переменная формы", () => {
+  const jinjaAt = (jinja: string) =>
+    at(scenarioUri, `{ "s": { "form": "hello_form", "a": "${jinja}" } }`, { [formsUri]: forms });
+
+  it("предлагается на месте начатого идентификатора", () => {
+    const result = jinjaAt("{% if mai| %}");
+    expect(result.kind).toBe("variable");
+    expect(result.items.map((i) => i.label)).toEqual(["main_form"]);
+    // Подпись — имя целевой формы: из текста выражения её не видно.
+    expect(result.items[0]?.detail).toBe("hello_form");
+  });
+
+  it("предлагается на пустом месте выражения", () => {
+    expect(jinjaAt("{{ | }}").items.map((i) => i.label)).toEqual(["main_form"]);
+    expect(jinjaAt("{% if | %}").items.map((i) => i.label)).toEqual(["main_form"]);
+  });
+
+  it("каретка посреди слова заменяет слово целиком", () => {
+    // Иначе принятый вариант дал бы main_formform.person.
+    const source = `{ "s": { "form": "hello_form", "a": "{% if main_|form.person %}" } }`;
+    const result = at(scenarioUri, source, { [formsUri]: forms });
+    const text = source.replace("|", "");
+    expect(text.slice(result.replaceStart, result.replaceEnd)).toBe("main_form");
+  });
+
+  it("после точки переменная не предлагается", () => {
+    // Это позиция поля (чужого объекта), а не переменной.
+    expect(jinjaAt("{{ variables.| }}").items).toEqual([]);
+    expect(jinjaAt("{{ variables. | }}").items).toEqual([]);
+  });
+
+  it("при динамической форме вариантов нет", () => {
+    const result = at(
+      scenarioUri,
+      '{ "s": { "form": "{{ x }}", "a": "{% if mai| %}" } }',
+      { [formsUri]: forms },
+    );
+    expect(result.items).toEqual([]);
+  });
+});
+
+describe("позиция имени фильтра", () => {
+  // Каретка здесь обозначается ‸: | занят оператором фильтра.
+  const atCaret = (jinja: string) => {
+    const source = `{ "s": { "form": "hello_form", "a": "${jinja}" } }`;
+    const offset = source.indexOf("‸");
+    const text = source.slice(0, offset) + source.slice(offset + 1);
+    return completionAt(
+      index({ [formsUri]: forms, [scenarioUri]: text }),
+      documentContext(scenarioUri, text),
+      offset,
+    ).items.map((i) => i.label);
+  };
+
+  it("после | не предлагается ни переменная, ни поле", () => {
+    // Jinja ждёт здесь имя фильтра, а не значение.
+    expect(atCaret("{{ x | ‸ }}")).toEqual([]);
+    expect(atCaret("{{ x | mai‸ }}")).toEqual([]);
+    expect(atCaret("{{ x |mai‸ }}")).toEqual([]);
+    expect(atCaret("{{ x | main_form.‸ }}")).toEqual([]);
+  });
+
+  it("аргумент фильтра — обычная позиция значения", () => {
+    expect(atCaret("{{ x | default(main_form.‸) }}")).toEqual(["name", "age"]);
+    expect(atCaret("{{ x | default(mai‸) }}")).toEqual(["main_form"]);
+  });
+});
+
 describe("имена файлов шаблонов", () => {
   const templates = {
     [`${root}/templates/items.jinja2`]: "",

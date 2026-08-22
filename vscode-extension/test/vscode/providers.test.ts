@@ -216,6 +216,25 @@ describe("CompletionItemProvider", () => {
   });
 });
 
+describe("CompletionItemProvider для переменной формы", () => {
+  it("заменяет слово целиком, даже если каретка стоит посреди него", async () => {
+    const text = scenario.replace("{{ main_form.name }}", "{% if main_form %}");
+    const provider = createCompletionProvider(workspace);
+    const items = (await provider.provideCompletionItems(
+      doc(scenarioUri, text),
+      positionOf(text, "main_form", 4),
+      undefined as never,
+      undefined as never,
+    )) as unknown as vscodeMock.CompletionItem[];
+
+    expect(items.map((i) => i.label)).toEqual(["main_form"]);
+    const range = items[0]?.range as vscodeMock.Range;
+    expect(lineOf(text, range.start.line).slice(range.start.character, range.end.character))
+      .toBe("main_form");
+    expect(items[0]?.kind).toBe(vscodeMock.CompletionItemKind.Variable);
+  });
+});
+
 describe("CompletionItemProvider для файлов шаблонов", () => {
   const formsWithFile = [
     "{",

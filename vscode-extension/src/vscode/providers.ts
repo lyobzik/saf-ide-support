@@ -110,6 +110,8 @@ function completionKind(kind: CompletionKind): vscode.CompletionItemKind {
       return vscode.CompletionItemKind.Field;
     case "file":
       return vscode.CompletionItemKind.File;
+    case "variable":
+      return vscode.CompletionItemKind.Variable;
     default:
       return vscode.CompletionItemKind.Reference;
   }

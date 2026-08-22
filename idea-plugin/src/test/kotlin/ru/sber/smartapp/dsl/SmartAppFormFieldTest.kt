@@ -301,6 +301,116 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         assertTrue(items.contains("age"))
     }
 
+    fun testFieldCompletionAfterKeywordInStatementTag() {
+        // Слева от обращения к полю почти всегда стоит ключевое слово Jinja, а не
+        // присваивание: `{% if main_form.x %}` — самая частая форма в бою. Пока
+        // проверялся только `{% set x = … %}`, пробел после слова гасил completion.
+        val expressions = listOf(
+            "{% if main_form.<caret> %}",
+            "{% if not main_form.<caret> %}",
+            "{% for i in main_form.<caret> %}",
+            "{% if a and main_form.<caret> %}",
+        )
+        expressions.forEachIndexed { index, expr ->
+            val items = completeAt(
+                "static/references/scenarios/kw$index.json",
+                """{ "kw$index": { "type": "form_filling", "form": "hello_form", "g": "$expr" } }""",
+            )
+            assertTrue("completion полей в '$expr': $items", items.contains("name"))
+            assertTrue(items.contains("age"))
+        }
+    }
+
+    fun testNoFieldCompletionForForeignFieldWithSpaceAfterDot() {
+        // `variables. main_form.` — обращение к чужому полю: пробел после точки
+        // ничего не меняет, и допуск пробелов слева не должен это открыть.
+        val items = completeAt(
+            "static/references/scenarios/foreign.json",
+            """{ "foreign": { "type": "form_filling", "form": "hello_form", "g": "{{ variables. main_form.<caret> }}" } }""",
+        )
+        assertFalse("чужое поле не открывает completion: $items", items.contains("name"))
+    }
+
+    fun testFormVariableCompletionOnIdentifier() {
+        // Каретка на самом идентификаторе, а не после точки: пользователь набирает
+        // `{% if mai<caret> %}` и ждёт `main_form`.
+        val items = completeAt(
+            "static/references/scenarios/var1.json",
+            """{ "var1": { "type": "form_filling", "form": "hello_form", "g": "{% if mai<caret> %}" } }""",
+        )
+        assertTrue("переменная формы в statement-теге: $items", items.contains("main_form"))
+    }
+
+    fun testFormVariableCompletionOnEmptyExpression() {
+        val items = completeAt(
+            "static/references/scenarios/var2.json",
+            """{ "var2": { "type": "form_filling", "form": "hello_form", "g": "{{ <caret> }}" } }""",
+        )
+        assertTrue("переменная формы в пустой интерполяции: $items", items.contains("main_form"))
+    }
+
+    fun testAcceptedVariableReplacesWholeWord() {
+        // Каретка посреди слова: без замены хвоста получилось бы
+        // `main_formform.person` — ровно то, что видит пользователь, дополняя
+        // уже написанное выражение.
+        val text = completeAndAccept(
+            "static/references/scenarios/var_insert.json",
+            """{ "vi": { "type": "form_filling", "form": "hello_form", "g": "{% if main_<caret>form.person %}" } }""",
+            "main_form",
+        )
+        assertTrue("слово заменено целиком: $text", text.contains("{% if main_form.person %}"))
+        assertFalse(text.contains("main_formform"))
+    }
+
+    fun testAcceptedFieldReplacesWholeWord() {
+        val text = completeAndAccept(
+            "static/references/scenarios/field_insert.json",
+            """{ "fi": { "type": "form_filling", "form": "hello_form", "g": "{{ main_form.na<caret>me }}" } }""",
+            "name",
+        )
+        assertTrue("поле заменено целиком: $text", text.contains("{{ main_form.name }}"))
+        assertFalse(text.contains("namename"))
+    }
+
+    fun testNoCompletionInFilterNamePosition() {
+        // После `|` Jinja ждёт имя фильтра: ни переменная, ни поле там не к месту.
+        val afterPipe = completeAt(
+            "static/references/scenarios/filter1.json",
+            """{ "f1": { "type": "form_filling", "form": "hello_form", "g": "{{ x | mai<caret> }}" } }""",
+        )
+        assertFalse("переменная в позиции фильтра: $afterPipe", afterPipe.contains("main_form"))
+
+        val afterPipeField = completeAt(
+            "static/references/scenarios/filter2.json",
+            """{ "f2": { "type": "form_filling", "form": "hello_form", "g": "{{ x | main_form.<caret> }}" } }""",
+        )
+        assertFalse("поле в позиции фильтра: $afterPipeField", afterPipeField.contains("name"))
+
+        // Аргумент фильтра — обычная позиция значения, там всё работает.
+        val insideArgs = completeAt(
+            "static/references/scenarios/filter3.json",
+            """{ "f3": { "type": "form_filling", "form": "hello_form", "g": "{{ x | default(main_form.<caret>) }}" } }""",
+        )
+        assertTrue("аргумент фильтра — позиция значения: $insideArgs", insideArgs.contains("name"))
+    }
+
+    fun testNoFormVariableCompletionAfterDot() {
+        // Позиция поля чужого объекта: переменная формы здесь ни при чём.
+        val items = completeAt(
+            "static/references/scenarios/var3.json",
+            """{ "var3": { "type": "form_filling", "form": "hello_form", "g": "{{ variables.<caret> }}" } }""",
+        )
+        assertFalse("после точки переменная не предлагается: $items", items.contains("main_form"))
+    }
+
+    fun testNoFormVariableCompletionWhenFormIsDynamic() {
+        val items = completeAt(
+            "static/references/scenarios/var4.json",
+            """{ "var4": { "type": "form_filling", "form": "{{ x }}", "g": "{% if mai<caret> %}" } }""",
+        )
+        assertFalse("динамическая форма — вариантов нет: $items", items.contains("main_form"))
+    }
+
     fun testNoFieldCompletionAfterClosedInterpolation() {
         // Каретка после закрытой интерполяции — вне {{ }}; completion полей
         // не активируется (regression: ранее активировался по последнему {{).
@@ -632,7 +742,41 @@ class SmartAppFormFieldTest : BasePlatformTestCase() {
         myFixture.editor.caretModel.moveToOffset(caret)
         // completeBasic может не активировать BASIC-contributors в середине
         // непустого строкового значения; явный BASIC-вызов надёжнее.
-        myFixture.complete(com.intellij.codeInsight.completion.CompletionType.BASIC)
-        return myFixture.lookupElementStrings ?: emptyList()
+        val elements = myFixture.complete(com.intellij.codeInsight.completion.CompletionType.BASIC)
+        // Единственный подходящий вариант платформа вставляет сразу, не показывая
+        // lookup: тогда фактически предложенным вариантом является уже вставленный
+        // идентификатор (та же логика, что в раннере корпуса).
+        return myFixture.lookupElementStrings
+            ?: elements?.map { it.lookupString }
+            ?: listOf(insertedIdentifier())
+    }
+
+    /**
+     * Вызывает completion и принимает вариант [choice]; возвращает текст документа.
+     * Единственный вариант платформа вставляет сама, тогда lookup не открывается.
+     */
+    private fun completeAndAccept(path: String, contentWithCaret: String, choice: String): String {
+        val caret = contentWithCaret.indexOf("<caret>")
+        check(caret >= 0) { "no <caret> marker" }
+        val file = myFixture.addFileToProject(path, contentWithCaret.replace("<caret>", ""))
+        myFixture.openFileInEditor(file.virtualFile)
+        myFixture.editor.caretModel.moveToOffset(caret)
+        val elements = myFixture.complete(com.intellij.codeInsight.completion.CompletionType.BASIC)
+        if (elements != null) {
+            val item = elements.firstOrNull { it.lookupString == choice }
+                ?: error("вариант '$choice' не предложен: ${elements.map { it.lookupString }}")
+            myFixture.lookup.currentItem = item
+            myFixture.finishLookup(com.intellij.codeInsight.lookup.Lookup.NORMAL_SELECT_CHAR)
+        }
+        return myFixture.editor.document.text
+    }
+
+    /** Идентификатор, который платформа вставила в документ при авто-вставке. */
+    private fun insertedIdentifier(): String {
+        val text = myFixture.editor.document.text
+        val caret = myFixture.editor.caretModel.offset
+        var start = caret
+        while (start > 0 && text[start - 1].isJavaIdentifierPart()) start--
+        return text.substring(start, caret)
     }
 }

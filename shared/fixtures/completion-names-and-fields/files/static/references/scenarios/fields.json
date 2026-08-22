@@ -6,6 +6,16 @@
     "typed": "{{ main_form.na }}",
     "chain": "{{ main_form.name. }}",
     "statement": "{% set x = main_form. %}",
+    "if_statement": "{% if main_form. %}",
+    "in_statement": "{% for i in main_form. %}",
+    "var_interp": "{{  }}",
+    "var_statement": "{% if  %}",
+    "var_foreign": "{{ variables. }}",
+    "var_filter": "{{ x |  }}",
+    "not_statement": "{% if not main_form. %}",
+    "and_statement": "{% if a and main_form. %}",
+    "call_argument": "{{ f(a, main_form.) }}",
+    "call_argument_var": "{{ f(a, ) }}",
     "in_string": "{{ x | default('main_form.') }}"
   }
 }

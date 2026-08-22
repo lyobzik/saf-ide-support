@@ -57,6 +57,8 @@ export enum CompletionItemKind {
   Keyword = 14,
   Reference = 18,
   Field = 5,
+  File = 16,
+  Variable = 6,
 }
 
 export class CompletionItem {
