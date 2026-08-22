@@ -117,12 +117,15 @@ function completionKind(kind: CompletionKind): vscode.CompletionItemKind {
   }
 }
 
-export function createSemanticTokensProvider(): vscode.DocumentSemanticTokensProvider {
+export function createSemanticTokensProvider(
+  workspace: SmartAppWorkspace,
+): vscode.DocumentSemanticTokensProvider {
   return {
     provideDocumentSemanticTokens(document) {
       const context = contextOf(document);
+      const custom = workspace.index.customKeywordsOf(context.scopeRoot);
       const builder = new vscode.SemanticTokensBuilder(SEMANTIC_TOKEN_LEGEND);
-      for (const token of semanticTokens(context)) {
+      for (const token of semanticTokens(context, custom)) {
         // Токен может пересекать перевод строки только в патологическом JSON;
         // такие пропускаем — VS Code не принимает многострочные токены.
         const start = document.positionAt(token.start);

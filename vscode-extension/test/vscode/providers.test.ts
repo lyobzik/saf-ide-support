@@ -282,7 +282,7 @@ describe("CompletionItemProvider для файлов шаблонов", () => {
 
 describe("DocumentSemanticTokensProvider", () => {
   it("отдаёт токены в координатах строк, а не смещений", async () => {
-    const provider = createSemanticTokensProvider();
+    const provider = createSemanticTokensProvider(workspace);
     const tokens = (await provider.provideDocumentSemanticTokens(
       doc(scenarioUri, scenario),
       undefined as never,

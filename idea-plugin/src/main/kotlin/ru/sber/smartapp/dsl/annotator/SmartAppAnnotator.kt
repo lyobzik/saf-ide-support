@@ -11,6 +11,7 @@ import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
 import ru.sber.smartapp.dsl.SmartAppFiles
 import ru.sber.smartapp.dsl.SmartAppKeywords
+import ru.sber.smartapp.dsl.resources.SmartAppCustomKeywords
 import ru.sber.smartapp.dsl.SmartAppRefKind
 import ru.sber.smartapp.dsl.SmartAppScopes
 import ru.sber.smartapp.dsl.SmartAppTypeContext
@@ -187,6 +188,14 @@ class SmartAppAnnotator : Annotator, DumbAware {
     }
 
     /**
+     * Ключевые слова, зарегистрированные приложением: словарь фреймворка играет
+     * роль пола, приложение только добавляет. Источник — Python-файлы набора,
+     * поэтому список берётся у сервиса, а не из ресурса плагина.
+     */
+    private fun customKeywords(element: JsonProperty) =
+        SmartAppCustomKeywords.of(element.containingFile.originalFile)
+
+    /**
      * Контекстная проверка ключевого слова: если категория контейнера
      * распознана — слово должно принадлежать именно ей (тип filler'а не должен
      * подсвечиваться в позиции типа сценария); иначе — мягкий откат к
@@ -198,6 +207,12 @@ class SmartAppAnnotator : Annotator, DumbAware {
         value: String,
     ): Boolean {
         val category = SmartAppTypeContext.categoryFor(property, fileKind)
+        if (customKeywords(property).any {
+                it.name == value && (category == null || it.category == category)
+            }
+        ) {
+            return true
+        }
         return if (category != null) SmartAppKeywords.isKeyword(category, value)
         else SmartAppKeywords.isAnyKeyword(value)
     }

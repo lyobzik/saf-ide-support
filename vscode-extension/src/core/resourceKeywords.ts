@@ -1,0 +1,175 @@
+import { keywordRegistries, resourceScan } from "./contract";
+import { parseModule, type PyClass, type PyModule, type Registration } from "./pythonScan";
+
+/**
+ * Ресурсы приложения: какие ключевые слова регистрирует активный класс.
+ *
+ * Активный класс — тот, что назначен переменной `RESOURCES` в `app_config.py`;
+ * сканировать всякий наследник `SmartAppResources` нельзя, иначе в словарь
+ * попадут неиспользуемые и тестовые классы. Цепочка наследования разрешается по
+ * правилам Python: регистрации базы учитываются, только если производный метод
+ * вызвал `super()`, а при совпадении имени побеждает производный класс.
+ *
+ * Порт 1:1 — `SmartAppResourceResolver.kt`. Файлы читает вызывающий: ядро в
+ * файловую систему не ходит.
+ */
+
+/** Ключевое слово, зарегистрированное приложением. */
+export interface CustomKeyword {
+  readonly category: string;
+  /** Декодированное имя — в тех же координатах, что значение JSON. */
+  readonly name: string;
+  /** Сырой диапазон содержимого литерала в файле регистрации. */
+  readonly nameStart: number;
+  readonly nameEnd: number;
+  /** Правая часть регистрации, если это идентификатор. */
+  readonly className: string | undefined;
+  /** Путь файла регистрации относительно корня приложения. */
+  readonly file: string;
+}
+
+/** Чтение файла приложения по пути относительно его корня. */
+export type ModuleReader = (relativePath: string) => string | undefined;
+
+interface ClassRef {
+  readonly file: string;
+  readonly name: string;
+}
+
+/**
+ * Ключевые слова активного класса ресурсов приложения.
+ * Пустой список — «нечего предложить»: это не ошибка и диагностики не даёт.
+ */
+export function customKeywords(read: ModuleReader): CustomKeyword[] {
+  const configText = read(resourceScan.configFile);
+  if (configText === undefined) return [];
+  const config = parseModule(configText);
+
+  // Присваивание RESOURCES в ветке `if` делает выбор класса динамическим:
+  // угадывать ветку нельзя, поэтому слов нет вовсе (план, раздел 1).
+  if (config.conditionalVars.has(resourceScan.resourcesVariable)) return [];
+  const value = config.topLevelVars.get(resourceScan.resourcesVariable);
+  if (value === undefined) return [];
+
+  const start = classRefOf(value, config, resourceScan.configFile);
+  if (start === undefined) return [];
+
+  const chain = resolveChain(start, read);
+  if (chain === undefined) return [];
+  return effectiveKeywords(chain);
+}
+
+/** Куда указывает точечное значение в модуле [module], разобранном из [moduleFile]. */
+function classRefOf(value: string, module: PyModule, moduleFile: string): ClassRef | undefined {
+  const direct = module.imports.get(value);
+  if (direct !== undefined) return { file: modulePath(direct.module), name: direct.name };
+
+  if (value.includes(".")) {
+    const lastDot = value.lastIndexOf(".");
+    const alias = value.slice(0, lastDot);
+    const name = value.slice(lastDot + 1);
+    const imported = module.moduleImports.get(alias);
+    return imported === undefined ? undefined : { file: modulePath(imported), name };
+  }
+  // Класс объявлен в самом файле, который мы уже разобрали.
+  return module.classes.some((cls) => cls.name === value) ? { file: moduleFile, name: value } : undefined;
+}
+
+/** `a.b.c` -> `a/b/c.py`; пакетный вариант пробует [readModule]. */
+function modulePath(module: string): string {
+  return `${module.split(".").join("/")}${resourceScan.fileExtension}`;
+}
+
+interface ChainEntry {
+  readonly cls: PyClass;
+  readonly file: string;
+}
+
+/**
+ * Цепочка классов от базы к производному. `undefined` — цепочка непригодна:
+ * любое множественное наследование сканировать нельзя, потому что `super()`
+ * идёт по MRO, а библиотечная база сканеру не видна.
+ */
+function resolveChain(start: ClassRef, read: ModuleReader): ChainEntry[] | undefined {
+  const chain: ChainEntry[] = [];
+  const visited = new Set<string>();
+  let current: ClassRef | undefined = start;
+
+  for (let depth = 0; current !== undefined && depth < resourceScan.maxBaseDepth; depth++) {
+    const key = `${current.file}#${current.name}`;
+    if (visited.has(key)) break;
+    visited.add(key);
+
+    const text = readModule(read, current.file);
+    if (text === undefined) break;
+    const module = parseModule(text);
+    const name: string = current.name;
+    const cls: PyClass | undefined = module.classes.find((candidate) => candidate.name === name);
+    if (cls === undefined) break;
+
+    chain.push({ cls, file: current.file });
+    if (cls.bases.length > 1) return undefined;
+    const base: string | undefined = cls.bases[0];
+    current = base === undefined ? undefined : classRefOf(base, module, current.file);
+  }
+  chain.reverse(); // от базы к производному — в порядке применения
+  return chain;
+}
+
+/** Текст модуля: сначала `a/b/c.py`, затем `a/b/c/__init__.py`. */
+function readModule(read: ModuleReader, file: string): string | undefined {
+  if (file.length === 0 || hasExcludedSegment(file)) return undefined;
+  const direct = read(file);
+  if (direct !== undefined) return direct;
+  if (!file.endsWith(resourceScan.fileExtension)) return undefined;
+  const asPackage = `${file.slice(0, -resourceScan.fileExtension.length)}/${resourceScan.packageInitFile}`;
+  return hasExcludedSegment(asPackage) ? undefined : read(asPackage);
+}
+
+/** Путь внутри исключённого каталога (venv, site-packages, …) — не код приложения. */
+export function hasExcludedSegment(path: string): boolean {
+  return path.split("/").some((segment) => resourceScan.excludedDirs.has(segment));
+}
+
+/** Ключ словаря действующих регистраций: пара «категория + имя», без склейки строк. */
+const keyOf = (category: string, name: string): string => JSON.stringify([category, name]);
+
+/**
+ * Свёртка цепочки в действующий словарь: метод производного класса заменяет
+ * одноимённый метод базы и наследует его регистрации только через `super()`.
+ */
+function effectiveKeywords(chain: readonly ChainEntry[]): CustomKeyword[] {
+  const byMethod = new Map<string, Map<string, CustomKeyword>>();
+  for (const entry of chain) {
+    for (const method of entry.cls.methods) {
+      if (!method.name.startsWith(resourceScan.methodPrefix)) continue;
+      const inherited = method.callsSuper ? byMethod.get(method.name) : undefined;
+      const merged = new Map(inherited ?? []);
+      for (const registration of method.registrations) {
+        const keyword = keywordOf(registration, entry.file);
+        if (keyword === undefined) continue;
+        merged.set(keyOf(keyword.category, keyword.name), keyword);
+      }
+      byMethod.set(method.name, merged);
+    }
+  }
+
+  const result = new Map<string, CustomKeyword>();
+  for (const merged of byMethod.values()) {
+    for (const [key, keyword] of merged) result.set(key, keyword);
+  }
+  return [...result.values()];
+}
+
+function keywordOf(registration: Registration, file: string): CustomKeyword | undefined {
+  const category = keywordRegistries.get(registration.registry);
+  if (category === undefined) return undefined;
+  return {
+    category,
+    name: registration.name,
+    nameStart: registration.nameStart,
+    nameEnd: registration.nameEnd,
+    className: registration.className,
+    file,
+  };
+}

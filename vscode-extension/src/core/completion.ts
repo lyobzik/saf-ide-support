@@ -94,7 +94,7 @@ export function completionAt(
     propertyValue(property) === node &&
     propertyName(property) === typeContext.typeProperty
   ) {
-    return keywordCompletion(context, property, node, offset);
+    return keywordCompletion(index, context, property, node, offset);
   }
 
   if (isFileReference(node)) {
@@ -105,6 +105,7 @@ export function completionAt(
 }
 
 function keywordCompletion(
+  index: SmartAppIndex,
   context: DocumentContext,
   property: Node,
   node: Node,
@@ -113,12 +114,20 @@ function keywordCompletion(
   const category = categoryFor(property, context.kind);
   const scoped = category === undefined ? undefined : keywordsByCategory.get(category);
   const keywords = scoped !== undefined && scoped.size > 0 ? scoped : allKeywords;
+  const items: CompletionItem[] = [...keywords].map((label) => ({ label, detail: "type" }));
 
-  return {
-    kind: "keyword",
-    items: [...keywords].map((label) => ({ label, detail: "type" })),
-    ...literalRange(node, offset),
-  };
+  // Слова приложения: подпись — класс, который за ними стоит. Из значения type
+  // его не видно, а это единственное, чем кастомное слово отличается от
+  // фреймворкового.
+  const offered = new Set(items.map((item) => item.label));
+  for (const keyword of index.customKeywordsOf(context.scopeRoot)) {
+    if (category !== undefined && keyword.category !== category) continue;
+    if (offered.has(keyword.name)) continue;
+    offered.add(keyword.name);
+    items.push({ label: keyword.name, detail: keyword.className ?? "type" });
+  }
+
+  return { kind: "keyword", items, ...literalRange(node, offset) };
 }
 
 function nameCompletion(

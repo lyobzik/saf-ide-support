@@ -37,7 +37,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.languages.registerRenameProvider(JSON_SELECTOR, createRenameProvider(workspace)),
     vscode.languages.registerDocumentSemanticTokensProvider(
       JSON_SELECTOR,
-      createSemanticTokensProvider(),
+      createSemanticTokensProvider(workspace),
       SEMANTIC_TOKEN_LEGEND,
     ),
     vscode.languages.registerCompletionItemProvider(

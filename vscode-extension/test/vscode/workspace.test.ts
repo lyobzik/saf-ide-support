@@ -37,8 +37,9 @@ describe("SmartAppWorkspace.start", () => {
     const workspace = new SmartAppWorkspace();
     const started = workspace.start();
 
-    // Пока findFiles не завершился, watcher уже обязан быть подписан.
-    expect(workspaceControl.watchers).toHaveLength(1);
+    // Пока findFiles не завершился, watcher'ы уже обязаны быть подписаны:
+    // первый — на DSL-файлы, второй — на Python-ресурсы приложения.
+    expect(workspaceControl.watchers).toHaveLength(2);
     workspaceControl.files.set(lateUri, '{ "late_form": { "type": "form" } }');
     workspaceControl.watchers[0]!.created.fire(Uri.parse(lateUri));
 

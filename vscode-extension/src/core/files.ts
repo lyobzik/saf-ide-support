@@ -73,3 +73,31 @@ function kindFromSegments(segments: readonly string[]): RefKind | undefined {
   }
   return undefined;
 }
+
+/**
+ * Корень приложения: каталог, содержащий `static/references`. Относительно него
+ * разрешаются `app_config.py`, модули и Python-файлы ресурсов.
+ */
+export function applicationRootOf(referencesRootPath: string): string {
+  const segments = referencesRootPath.split("/");
+  return segments.slice(0, Math.max(0, segments.length - paths.rootSegments.length)).join("/");
+}
+
+/**
+ * Ближайший (самый глубокий) корень приложения, которому принадлежит путь.
+ *
+ * Корни могут вкладываться друг в друга (`project` и `project/subapp`), и файл
+ * обязан принадлежать ровно одному: иначе Python-файл внутреннего приложения
+ * попал бы в словарь внешнего.
+ */
+export function ownerApplicationRoot(
+  path: string,
+  applicationRoots: Iterable<string>,
+): string | undefined {
+  let owner: string | undefined;
+  for (const root of applicationRoots) {
+    if (path !== root && !path.startsWith(`${root}/`)) continue;
+    if (owner === undefined || root.length > owner.length) owner = root;
+  }
+  return owner;
+}

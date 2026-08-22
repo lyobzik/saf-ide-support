@@ -19,6 +19,7 @@ import {
 } from "./ast";
 import { kindOf, referencesRoot } from "./files";
 import { isJinja } from "./jinja";
+import type { CustomKeyword } from "./resourceKeywords";
 import { decode, rawText } from "./jsonDecode";
 import { fieldCandidates, formVariableOccurrences } from "./jinjaLexer";
 import { targetFormOf } from "./fieldRef";
@@ -227,8 +228,18 @@ export function keywordCategoryAt(node: Node, kind: RefKind | undefined): string
  * true, если значение — ключевое слово в своём контексте. Если категория
  * распознана, слово обязано принадлежать именно ей; иначе — мягкий откат к
  * принадлежности любой категории.
+ *
+ * [custom] — слова, зарегистрированные приложением: словарь фреймворка играет
+ * роль пола, приложение только добавляет (см. план, раздел 6).
  */
-export function isKeywordInContext(value: string, category: string | undefined): boolean {
+export function isKeywordInContext(
+  value: string,
+  category: string | undefined,
+  custom: readonly CustomKeyword[] = [],
+): boolean {
+  if (custom.some((k) => k.name === value && (category === undefined || k.category === category))) {
+    return true;
+  }
   if (category === undefined) return allKeywords.has(value);
   return keywordsByCategory.get(category)?.has(value) === true;
 }

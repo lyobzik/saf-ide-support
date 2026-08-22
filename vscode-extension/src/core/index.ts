@@ -9,7 +9,15 @@ import {
   type Node,
   type ParsedDocument,
 } from "./ast";
-import { kindOf, pathSegments, referencesRoot } from "./files";
+import {
+  applicationRootOf,
+  kindOf,
+  ownerApplicationRoot,
+  pathSegments,
+  referencesRoot,
+} from "./files";
+import { customKeywords, hasExcludedSegment, type CustomKeyword } from "./resourceKeywords";
+import { resourceScan } from "./contract";
 import { indexEligibility } from "./indexGate";
 import { isJinja } from "./jinja";
 import { decode, rawText } from "./jsonDecode";
@@ -89,6 +97,19 @@ export class SmartAppIndex {
    * только факт существования.
    */
   private readonly assets = new Map<string, string>();
+
+  /**
+   * Тексты Python-файлов приложений: словарь ключевых слов — свойство навыка,
+   * и собрать его можно только прочитав цепочку от `RESOURCES`.
+   */
+  private readonly pythonTexts = new Map<string, string>();
+
+  /**
+   * Разобранный словарь по корням приложений. Сбрасывается целиком при любом
+   * изменении Python: правка базового класса меняет словарь производного, и
+   * обновить «только изменившийся файл» было бы неверно.
+   */
+  private readonly customCache = new Map<string, readonly CustomKeyword[]>();
   private ready = false;
 
   /**
@@ -107,7 +128,56 @@ export class SmartAppIndex {
   clear(): void {
     this.files.clear();
     this.assets.clear();
+    this.pythonTexts.clear();
+    this.customCache.clear();
     this.ready = false;
+  }
+
+  /** Добавляет или заменяет текст Python-файла приложения. */
+  upsertPython(uri: string, text: string): void {
+    this.pythonTexts.set(pathKey(uri), text);
+    this.customCache.clear();
+  }
+
+  removePython(uri: string): void {
+    if (this.pythonTexts.delete(pathKey(uri))) this.customCache.clear();
+  }
+
+  /** Файл относится к ресурсам приложения (не DSL, не шаблон)? */
+  static isPythonFile(uri: string): boolean {
+    const path = pathSegments(uri).join("/");
+    return path.endsWith(resourceScan.fileExtension) && !hasExcludedSegment(path);
+  }
+
+  /** Корни приложений, известные индексу (по найденным наборам references). */
+  applicationRoots(): Set<string> {
+    const roots = new Set<string>();
+    for (const entry of this.files.values()) {
+      if (entry.scopeRoot !== undefined) roots.add(applicationRootOf(entry.scopeRoot));
+    }
+    return roots;
+  }
+
+  /**
+   * Ключевые слова, зарегистрированные приложением набора [scopeRoot].
+   *
+   * Читаются только файлы, которыми владеет это же приложение: вложенный
+   * `subapp` — отдельное приложение, и его ресурсы в словарь внешнего не идут.
+   */
+  customKeywordsOf(scopeRoot: string | undefined): readonly CustomKeyword[] {
+    if (scopeRoot === undefined) return [];
+    const appRoot = applicationRootOf(scopeRoot);
+    const cached = this.customCache.get(appRoot);
+    if (cached !== undefined) return cached;
+
+    const roots = this.applicationRoots();
+    const resolved = customKeywords((relative) => {
+      const path = appRoot.length === 0 ? relative : `${appRoot}/${relative}`;
+      if (ownerApplicationRoot(path, roots) !== appRoot) return undefined;
+      return this.pythonTexts.get(path);
+    });
+    this.customCache.set(appRoot, resolved);
+    return resolved;
   }
 
   /**
@@ -156,6 +226,10 @@ export class SmartAppIndex {
   /** Добавляет или заменяет содержимое файла в индексе. */
   upsert(uri: string, text: string): void {
     this.remove(uri);
+    if (SmartAppIndex.isPythonFile(uri)) {
+      this.upsertPython(uri, text);
+      return;
+    }
     const kind = kindOf(uri);
     if (kind === undefined) {
       // Не DSL-файл внутри набора references (шаблон Jinja и т.п.): содержимое
@@ -188,8 +262,9 @@ export class SmartAppIndex {
   }
 
   remove(uri: string): void {
-    this.files.delete(uri);
+    if (this.files.delete(uri)) this.customCache.clear();
     this.assets.delete(pathKey(uri));
+    this.removePython(uri);
   }
 
   /** Все определения [name] среди [kinds]. */

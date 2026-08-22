@@ -27,6 +27,7 @@ import ru.sber.smartapp.dsl.index.SmartAppNameIndex
 import ru.sber.smartapp.dsl.index.SmartAppFormFieldNameIndex
 import ru.sber.smartapp.dsl.reference.JsonStringLiteralDecoder
 import ru.sber.smartapp.dsl.reference.SmartAppFieldRef
+import ru.sber.smartapp.dsl.resources.SmartAppCustomKeywords
 import ru.sber.smartapp.dsl.reference.SmartAppFileRefRules
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaLexer
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType
@@ -89,7 +90,7 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         if (property != null && property.value === literal &&
             property.name == TypeContextSpec.typeProperty
         ) {
-            addKeywordVariants(property, fileKind, result)
+            addKeywordVariants(property, fileKind, parameters.originalFile, result)
             return
         }
 
@@ -107,6 +108,7 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
     private fun addKeywordVariants(
         property: JsonProperty,
         fileKind: SmartAppRefKind,
+        originalFile: PsiFile,
         result: CompletionResultSet,
     ) {
         val category = SmartAppTypeContext.categoryFor(property, fileKind)
@@ -117,6 +119,21 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
             result.addElement(
                 marked(
                     LookupElementBuilder.create(keyword).withTypeText("type"),
+                    SmartAppCompletionKind.KEYWORD,
+                    KEYWORD_PRIORITY,
+                ),
+            )
+        }
+
+        // Слова приложения: подпись — класс, который за ними стоит. Из значения
+        // type его не видно, а это единственное, чем кастомное слово отличается
+        // от фреймворкового. Файл берём оригинальный: у копии completion нет пути.
+        for (custom in SmartAppCustomKeywords.of(originalFile)) {
+            if (category != null && custom.category != category) continue
+            if (custom.name in keywords) continue
+            result.addElement(
+                marked(
+                    LookupElementBuilder.create(custom.name).withTypeText(custom.className ?: "type"),
                     SmartAppCompletionKind.KEYWORD,
                     KEYWORD_PRIORITY,
                 ),

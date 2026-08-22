@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { paths } from "../core/contract";
 import { SmartAppIndex } from "../core/index";
 import { isDslFile } from "../core/files";
+import { resourceScan } from "../core/contract";
 
 /**
  * Адаптер воркспейса: находит DSL-файлы, следит за изменениями и кормит ядро
@@ -46,11 +47,19 @@ export class SmartAppWorkspace implements vscode.Disposable {
    */
   async start(): Promise<void> {
     const watcher = vscode.workspace.createFileSystemWatcher(FILE_GLOB);
+    // Ресурсы приложения лежат вне static/references, поэтому у Python свой
+    // watcher — один на воркспейс. Отдельные watcher'ы на корень приложения
+    // пришлось бы пересоздавать при каждом изменении набора корней.
+    const pythonWatcher = vscode.workspace.createFileSystemWatcher(PYTHON_GLOB);
     this.disposables.push(
       watcher,
+      pythonWatcher,
       watcher.onDidCreate((uri) => void this.reload(uri, true)),
       watcher.onDidChange((uri) => void this.reload(uri, true)),
       watcher.onDidDelete((uri) => this.forget(uri)),
+      pythonWatcher.onDidCreate((uri) => void this.reloadPython(uri, true)),
+      pythonWatcher.onDidChange((uri) => void this.reloadPython(uri, true)),
+      pythonWatcher.onDidDelete((uri) => this.forget(uri)),
       // Правки в редакторе видны до сохранения — как в IDEA, где индекс
       // работает по PSI незасохранённого документа.
       vscode.workspace.onDidChangeTextDocument((event) => this.scheduleFromDocument(event.document)),
@@ -60,13 +69,23 @@ export class SmartAppWorkspace implements vscode.Disposable {
     const files = await vscode.workspace.findFiles(FILE_GLOB);
     await Promise.all(files.map((uri) => this.reload(uri)));
 
+    // Python сканируется после DSL: корни приложений известны только по
+    // найденным наборам static/references.
+    const pythonFiles = await vscode.workspace.findFiles(PYTHON_GLOB, PYTHON_EXCLUDE);
+    await Promise.all(pythonFiles.map((uri) => this.reloadPython(uri)));
+
     // Уже открытые документы могли измениться до активации расширения: их
     // содержимое в редакторе новее того, что лежит на диске.
     for (const document of vscode.workspace.textDocuments) {
       const key = document.uri.toString();
-      if (isDslFile(key) && document.isDirty) this.apply(key, document.getText(), false);
+      if ((isDslFile(key) || isPythonFile(key)) && document.isDirty) {
+        this.apply(key, document.getText(), false);
+      }
     }
 
+    // Готовность — только после обоих первичных сканирований: иначе кастомные
+    // слова первые секунды выглядели бы неизвестными, а потом «вдруг»
+    // становились ключевыми.
     this.index.markReady();
     this.onIndexed.fire();
   }
@@ -94,6 +113,21 @@ export class SmartAppWorkspace implements vscode.Disposable {
     } catch {
       if (this.generations.get(key) !== generation) return;
       // Файл исчез или недоступен — просто убираем его из индекса.
+      this.forget(uri);
+    }
+  }
+
+  /** Перечитывает Python-файл приложения: его содержимое нужно целиком. */
+  private async reloadPython(uri: vscode.Uri, notify = false): Promise<void> {
+    const key = uri.toString();
+    if (!isPythonFile(key)) return;
+    const generation = this.nextGeneration(key);
+    try {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      if (this.generations.get(key) !== generation) return;
+      this.apply(key, new TextDecoder().decode(bytes), notify);
+    } catch {
+      if (this.generations.get(key) !== generation) return;
       this.forget(uri);
     }
   }
@@ -139,7 +173,7 @@ export class SmartAppWorkspace implements vscode.Disposable {
   /** Дебаунс переиндексации по правкам в редакторе. */
   private scheduleFromDocument(document: vscode.TextDocument): void {
     const key = document.uri.toString();
-    if (!isDslFile(key)) return;
+    if (!isDslFile(key) && !isPythonFile(key)) return;
 
     const existing = this.pending.get(key);
     if (existing !== undefined) clearTimeout(existing);
@@ -170,3 +204,13 @@ const REINDEX_DELAY_MS = 250;
  * применяет ровно то же правило, что и плагин IDEA.
  */
 const FILE_GLOB = `**/${paths.rootSegments.join("/")}/**/*`;
+
+/** Ресурсы приложения: Python-файлы вне зависимостей и артефактов сборки. */
+const PYTHON_GLOB = `**/*${resourceScan.fileExtension}`;
+const PYTHON_EXCLUDE = `**/{${[...resourceScan.excludedDirs].join(",")}}/**`;
+
+/**
+ * Python-файл приложения. Исключённые каталоги отсекаются и здесь, а не только
+ * в глобе: watcher срабатывает и на файлы внутри `venv`.
+ */
+const isPythonFile = (uri: string): boolean => SmartAppIndex.isPythonFile(uri);

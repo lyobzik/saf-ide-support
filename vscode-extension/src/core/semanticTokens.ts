@@ -5,6 +5,7 @@ import { decode, rawText } from "./jsonDecode";
 import { TokenType, tokenize } from "./jinjaLexer";
 import { isKeywordInContext, isStructuralKey, keywordCategoryAt, type DocumentContext } from "./semantics";
 import { isValueNode } from "./ast";
+import type { CustomKeyword } from "./resourceKeywords";
 
 /**
  * Семантическая подсветка — порт `SmartAppAnnotator`.
@@ -12,6 +13,9 @@ import { isValueNode } from "./ast";
  * Работает на частичном дереве: подсветка не зависит от индекса и не гаснет на
  * недописанном файле, ровно как в IDEA (там аннотатор `DumbAware`, а
  * `JsonPsi.hasError` вызывается только индексаторами).
+ *
+ * [custom] — ключевые слова, зарегистрированные приложением: их источник
+ * (Python-файлы) знает только индекс, поэтому список передаётся снаружи.
  */
 
 /** Типы токенов; адаптер отображает их в легенду VS Code. */
@@ -38,7 +42,10 @@ export interface SemanticToken {
   readonly type: SemanticTokenType;
 }
 
-export function semanticTokens(context: DocumentContext): SemanticToken[] {
+export function semanticTokens(
+  context: DocumentContext,
+  custom: readonly CustomKeyword[] = [],
+): SemanticToken[] {
   if (context.kind === undefined) return [];
   const tokens: SemanticToken[] = [];
 
@@ -67,7 +74,7 @@ export function semanticTokens(context: DocumentContext): SemanticToken[] {
     if (property === undefined || propertyValue(property) !== node) return;
     const category = keywordCategoryAt(node, context.kind);
     if (propertyName(property) !== typeContext.typeProperty) return;
-    if (!isKeywordInContext(value, category)) return;
+    if (!isKeywordInContext(value, category, custom)) return;
 
     // Диапазон вместе с кавычками — как textRange литерала в IDEA.
     tokens.push({
