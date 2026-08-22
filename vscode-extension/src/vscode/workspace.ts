@@ -42,6 +42,16 @@ export class SmartAppWorkspace implements vscode.Disposable {
    */
   private readonly scannedRoots = new Set<string>();
 
+  /** Идёт ли сканирование Python прямо сейчас. */
+  private scanning = false;
+
+  /**
+   * Просьба пересканировать, пришедшая во время идущего сканирования. Событие
+   * иначе теряется: вызов видит корень уже помеченным и завершается, а идущий
+   * scan падает и пометку снимает — повторить оказывается некому.
+   */
+  private rescanRequested = false;
+
   /**
    * Все начатые асинхронные операции: чтения файлов и сканирования Python.
    * `start()` обязан дождаться и тех, что запустил не он сам — досканирование
@@ -154,9 +164,15 @@ export class SmartAppWorkspace implements vscode.Disposable {
   private async scanPython(notify = false): Promise<void> {
     const roots = this.index.applicationRoots();
     const fresh = [...roots].filter((root) => !this.scannedRoots.has(root));
-    if (fresh.length === 0) return;
+    if (fresh.length === 0) {
+      // Помечено — но, возможно, тем сканированием, которое ещё идёт и может
+      // упасть. Тогда наше событие обязано пережить его провал.
+      if (this.scanning) this.rescanRequested = true;
+      return;
+    }
     for (const root of fresh) this.scannedRoots.add(root);
 
+    this.scanning = true;
     this.index.beginPythonScan();
     try {
       const files = await vscode.workspace.findFiles(PYTHON_GLOB, PYTHON_EXCLUDE);
@@ -166,7 +182,14 @@ export class SmartAppWorkspace implements vscode.Disposable {
       // приложение навсегда останется без словаря — повторной попытки не будет.
       for (const root of fresh) this.scannedRoots.delete(root);
     } finally {
+      this.scanning = false;
       this.index.endPythonScan();
+    }
+
+    if (this.rescanRequested) {
+      this.rescanRequested = false;
+      await this.scanPython(notify);
+      return;
     }
     if (notify) this.onIndexed.fire();
   }

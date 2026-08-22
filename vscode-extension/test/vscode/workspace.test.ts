@@ -277,6 +277,38 @@ describe("жизненный цикл ресурсов приложения", ()
     workspace.dispose();
   });
 
+  it("событие во время падающего сканирования не теряется", async () => {
+    // Гонка: пока идёт сканирование, приходит событие; вызов видит корень уже
+    // помеченным и выходит, а идущее сканирование падает и пометку снимает.
+    // Без отложенного повтора событие теряется навсегда.
+    workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
+    workspaceControl.files.set(appResources, resourcesText("recovered_action"));
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "recovered_action" } }');
+    workspaceControl.findFilesFailures = 1;
+
+    let releasePython = (): void => undefined;
+    workspaceControl.pythonFindFilesGate = new Promise<void>((resolve) => {
+      releasePython = resolve;
+    });
+
+    const workspace = new SmartAppWorkspace();
+    const started = workspace.start();
+
+    // Ждём, пока падающее сканирование действительно начнётся.
+    await waitFor(() => workspaceControl.pythonFindFilesCalls > 0);
+    // Событие приходит до того, как сканирование завершилось ошибкой.
+    workspaceControl.watchers[0]!.created.fire(Uri.parse(appDsl));
+    await waitFor(() => workspaceControl.reads.includes(appDsl));
+
+    releasePython();
+    await started;
+
+    expect(
+      workspace.index.customKeywordsOf("w/app_b/static/references").map((k) => k.name),
+    ).toEqual(["recovered_action"]);
+    workspace.dispose();
+  });
+
   it("во время сканирования словарь не отдаётся", async () => {
     workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
     workspaceControl.files.set(appResources, resourcesText("scanned_action"));

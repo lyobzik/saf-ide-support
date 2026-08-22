@@ -260,6 +260,10 @@ export const workspaceControl = {
   },
   /** Сколько ближайших Python-сканирований должны завершиться ошибкой. */
   findFilesFailures: 0,
+  /** Шлюз для Python-сканирования: тест держит его открытым, пока шлёт события. */
+  pythonFindFilesGate: Promise.resolve(),
+  /** Сколько раз Python-сканирование уже стартовало. */
+  pythonFindFilesCalls: 0,
 
   /** Подписчики на открытие документа. */
   openListeners: [] as ((document: TextDocument) => void)[],
@@ -281,6 +285,8 @@ export const workspaceControl = {
     this.openListeners = [];
     this.openDocuments = [];
     this.findFilesFailures = 0;
+    this.pythonFindFilesGate = Promise.resolve();
+    this.pythonFindFilesCalls = 0;
     this.findFilesGate = Promise.resolve();
     this.readGates = [];
     this.reads = [];
@@ -293,6 +299,10 @@ export const workspaceControl = {
 Object.assign(workspace, {
   async findFiles(_glob: string, _exclude?: string): Promise<Uri[]> {
     await workspaceControl.findFilesGate;
+    if (_glob.includes(".py")) {
+      workspaceControl.pythonFindFilesCalls++;
+      await workspaceControl.pythonFindFilesGate;
+    }
     // Падение имитируется только для Python-сканирования: DSL-скан у теста
     // должен пройти, иначе не с чего появиться корню приложения.
     if (workspaceControl.findFilesFailures > 0 && _glob.includes(".py")) {
