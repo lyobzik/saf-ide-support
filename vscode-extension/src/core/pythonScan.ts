@@ -57,7 +57,10 @@ export function maskPython(text: string): { masked: string; strings: PyString[] 
       const contentStart = i + quote.length;
       let j = contentStart;
       while (j < text.length) {
-        if (text[j] === "\\" && !isRaw(prefix)) {
+        // В Python обратный слэш не даёт кавычке завершить строку даже в
+        // raw-литерале (`r"a\"b"` — валидно): для поиска конца это учитывается
+        // всегда, а вот содержимое raw-строки при декодировании не меняется.
+        if (text[j] === "\\") {
           j += 2;
           continue;
         }
@@ -96,7 +99,6 @@ function prefixStartAt(text: string, quote: number): number {
   return quote - start <= 3 ? start : quote;
 }
 
-const isRaw = (prefix: string): boolean => prefix.toLowerCase().includes("r");
 
 /**
  * Логические строки маскированного текста: перенос внутри скобок и хвостовой
@@ -209,6 +211,8 @@ interface Block {
   readonly kind: "class" | "def";
   readonly cls?: ClassDraft;
   readonly method?: MethodDraft;
+  /** Отступ тела: у `def` — отступ первой строки тела, дальше он фиксирован. */
+  bodyIndent?: number;
 }
 
 /** Разбирает модуль настолько, насколько нужно для чтения ресурсов приложения. */
@@ -249,8 +253,16 @@ export function parseModule(text: string): PyModule {
 
     const enclosing = stack[stack.length - 1];
     const method = enclosing?.kind === "def" ? enclosing.method : undefined;
+    if (enclosing !== undefined && enclosing.bodyIndent === undefined) {
+      enclosing.bodyIndent = line.indent;
+    }
+    // Только прямые операторы тела метода. Строка глубже — это `if`, `for`,
+    // `try`, `with` или вложенный `def`: регистрация там условная, и принять её
+    // значило бы обещать слово, которого в рантайме может не быть.
+    const directBodyLine = enclosing !== undefined && enclosing.bodyIndent === line.indent;
     const insideResourceMethod =
       method !== undefined &&
+      directBodyLine &&
       method.name.startsWith(resourceScan.methodPrefix) &&
       stack.length >= 2 &&
       (stack[stack.length - 2] as Block).kind === "class";
@@ -379,13 +391,18 @@ export function decodePyString(text: string, literal: PyString): string | undefi
         const width = next === "x" ? 2 : next === "u" ? 4 : 8;
         const digits = content.slice(i + 1, i + 1 + width);
         if (digits.length < width || !/^[0-9a-fA-F]+$/.test(digits)) return undefined;
-        out += String.fromCodePoint(parseInt(digits, 16));
+        const code = parseInt(digits, 16);
+        if (code > 0x10ffff) return undefined;
+        out += String.fromCodePoint(code);
         i += width;
         break;
       }
       default:
-        // Нераспознанный escape Python оставляет как есть — обе буквы.
-        out += "\\" + next;
+        // Контракт escape сознательно узкий (см. план): всё прочее — восьмеричные
+        // последовательности, \a, \b, \f, \v, \N{...} — не поддерживается.
+        // Отвергаем регистрацию целиком: подставить не то имя хуже, чем не
+        // подставить никакого.
+        return undefined;
     }
   }
   return out;
@@ -438,6 +455,9 @@ function registrationsIn(
     if (braceClose < 0) continue;
     for (const literal of strings) {
       if (literal.start < braceOpen || literal.end > braceClose) continue;
+      // Только непосредственные ключи внешнего словаря: строка внутри
+      // вложенного объекта — не имя ключевого слова.
+      if (bracketDepthBetween(masked, braceOpen + 1, literal.start) !== 0) continue;
       const after = masked.slice(literal.end, braceClose);
       if (!after.trimStart().startsWith(":")) continue;
       const name = decodePyString(text, literal);
@@ -453,6 +473,17 @@ function registrationsIn(
     }
   }
   return result;
+}
+
+/** Глубина вложенности скобок на участке [start, end) — 0 значит «верхний уровень». */
+function bracketDepthBetween(masked: string, start: number, end: number): number {
+  let depth = 0;
+  for (let i = start; i < end; i++) {
+    const char = masked[i] as string;
+    if (char === "(" || char === "[" || char === "{") depth++;
+    else if (char === ")" || char === "]" || char === "}") depth--;
+  }
+  return depth;
 }
 
 /** Точечное имя из текста значения, если это оно; иначе подписи не будет. */

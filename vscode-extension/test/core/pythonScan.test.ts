@@ -125,3 +125,79 @@ describe("структура модуля", () => {
     expect(module.topLevelVars.has("RESOURCES")).toBe(false);
   });
 });
+
+describe("управляющие конструкции в теле метода", () => {
+  // Регистрация под `if`/`for`/`try`/`with` условна: в рантайме её может не
+  // быть, поэтому принимаются только прямые операторы тела метода.
+  it.each([
+    ["if enabled:", "conditional"],
+    ["for name in names:", "looped"],
+    ["try:", "guarded"],
+    ["with lock:", "locked"],
+  ])("%s", (header) => {
+    const source =
+      "class R(Base):\n    def init_actions(self):\n" +
+      `        ${header}\n` +
+      '            actions["nested"] = C\n' +
+      '        actions["direct"] = C\n';
+    expect(registrationsOf(source).map((r) => r.name)).toEqual(["direct"]);
+  });
+
+  it("super() внутри условия не считается вызовом", () => {
+    const source =
+      "class R(Base):\n    def init_actions(self):\n        if enabled:\n            super().init_actions()\n";
+    const method = parseModule(source).classes[0]?.methods[0];
+    expect(method?.callsSuper).toBe(false);
+  });
+});
+
+describe("update: только ключи верхнего уровня", () => {
+  it("вложенный словарь ключей не даёт", () => {
+    const source =
+      "class R(Base):\n    def init_actions(self):\n" +
+      "        actions.update({\n" +
+      '            "outer": {\n' +
+      '                "inner": CustomAction,\n' +
+      "            },\n" +
+      "        })\n";
+    expect(registrationsOf(source).map((r) => r.name)).toEqual(["outer"]);
+  });
+
+  it("список значений тоже не даёт ключей", () => {
+    const source =
+      "class R(Base):\n    def init_actions(self):\n" +
+      '        actions.update({"outer": ["inner", "second"]})\n';
+    expect(registrationsOf(source).map((r) => r.name)).toEqual(["outer"]);
+  });
+});
+
+describe("escape-последовательности", () => {
+  const nameOf = (literal: string): string | undefined =>
+    registrationsOf(inMethod(`actions[${literal}] = C`))[0]?.name;
+
+  it.each([
+    ['"a\\u0041b"', "aAb"],
+    ['"a\\x41b"', "aAb"],
+    ['"a\\\\b"', "a\\b"],
+    ['"a\\nb"', "a\nb"],
+    ["'it\\'s'", "it's"],
+  ])("%s -> %s", (literal, expected) => {
+    expect(nameOf(literal as string)).toBe(expected);
+  });
+
+  it.each([
+    ['"bell\\a"'],
+    ['"back\\b"'],
+    ['"octal\\101"'],
+    ['"named\\N{BULLET}"'],
+    ['"huge\\U00110000"'],
+  ])("не поддерживается: %s", (literal) => {
+    // Контракт escape сознательно узкий: подставить не то имя хуже, чем никакого.
+    expect(nameOf(literal as string)).toBeUndefined();
+  });
+
+  it("raw-строка: экранированная кавычка не завершает литерал", () => {
+    const found = registrationsOf(inMethod('actions[r"a\\"b"] = C'));
+    expect(found.map((r) => r.name)).toEqual(['a\\"b']);
+  });
+});

@@ -249,10 +249,18 @@ export const workspaceControl = {
   /** Шлюзы и журнал для `fs.stat` — им проверяется существование не-DSL файлов. */
   statGates: [] as Promise<void>[],
   stats: [] as string[],
+  /** Подписчики на закрытие документа: тест закрывает документ сам. */
+  closeListeners: [] as ((document: TextDocument) => void)[],
+
+  /** Имитирует закрытие документа в редакторе. */
+  fireClose(document: TextDocument): void {
+    for (const listener of this.closeListeners) listener(document);
+  },
 
   reset(): void {
     this.files.clear();
     this.watchers = [];
+    this.closeListeners = [];
     this.findFilesGate = Promise.resolve();
     this.readGates = [];
     this.reads = [];
@@ -304,5 +312,14 @@ Object.assign(workspace, {
 
   onDidOpenTextDocument(_listener: unknown): Disposable {
     return new Disposable(() => undefined);
+  },
+
+  onDidCloseTextDocument(listener: (document: TextDocument) => void): Disposable {
+    workspaceControl.closeListeners.push(listener);
+    return new Disposable(() => {
+      workspaceControl.closeListeners = workspaceControl.closeListeners.filter(
+        (candidate) => candidate !== listener,
+      );
+    });
   },
 });

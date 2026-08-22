@@ -147,4 +147,77 @@ class SmartAppResourceScannerTest {
         assertTrue("RESOURCES" in module.conditionalVars)
         assertTrue(module.topLevelVars["RESOURCES"] == null)
     }
+
+    @Test
+    fun controlFlowInsideMethodIsRejected() {
+        // Регистрация под `if`/`for`/`try`/`with` условна: в рантайме её может не
+        // быть, поэтому принимаются только прямые операторы тела метода.
+        for (header in listOf("if enabled:", "for name in names:", "try:", "with lock:")) {
+            val source = "class R(Base):\n    def init_actions(self):\n" +
+                "        $header\n" +
+                """            actions["nested"] = C""" + "\n" +
+                """        actions["direct"] = C""" + "\n"
+            assertEquals("'$header'", listOf("direct"), registrations(source).map { it.name })
+        }
+    }
+
+    @Test
+    fun superInsideConditionIsNotCounted() {
+        val source = "class R(Base):\n    def init_actions(self):\n" +
+            "        if enabled:\n            super().init_actions()\n"
+        val method = SmartAppResourceScanner.parseModule(source).classes.single().methods.single()
+        assertEquals(false, method.callsSuper)
+    }
+
+    @Test
+    fun updateTakesOnlyTopLevelKeys() {
+        val nested = "class R(Base):\n    def init_actions(self):\n        actions.update({\n" +
+            """            "outer": {""" + "\n" +
+            """                "inner": CustomAction,""" + "\n" +
+            "            },\n        })\n"
+        assertEquals(listOf("outer"), registrations(nested).map { it.name })
+
+        val list = "class R(Base):\n    def init_actions(self):\n" +
+            """        actions.update({"outer": ["inner", "second"]})""" + "\n"
+        assertEquals(listOf("outer"), registrations(list).map { it.name })
+    }
+
+    @Test
+    fun supportedEscapes() {
+        val cases = listOf(
+            """"a@BSu0041b"""" to "aAb",
+            """"a@BSx41b"""" to "aAb",
+            """"a@BS@BSb"""" to "a@BSb",
+            "'it@BS's'" to "it's",
+        )
+        for ((literal, expected) in cases) {
+            val source = inMethod("actions[${literal.replace("@BS", BACKSLASH)}] = C")
+            assertEquals(
+                literal,
+                expected.replace("@BS", BACKSLASH),
+                registrations(source).single().name,
+            )
+        }
+    }
+
+    @Test
+    fun unsupportedEscapesRejectRegistration() {
+        // Контракт escape сознательно узкий: подставить не то имя хуже, чем никакого.
+        val rejected = listOf(""""bell@BSa"""", """"back@BSb"""", """"octal@BS101"""", """"named@BSN{BULLET}"""", """"huge@BSU00110000"""")
+        for (literal in rejected) {
+            val source = inMethod("actions[${literal.replace("@BS", BACKSLASH)}] = C")
+            assertEquals(literal, emptyList<Any>(), registrations(source))
+        }
+    }
+
+    @Test
+    fun rawStringKeepsEscapedQuote() {
+        val source = inMethod("""actions[r"a@BS"b"] = C""".replace("@BS", BACKSLASH))
+        assertEquals(listOf("""a@BS"b""".replace("@BS", BACKSLASH)), registrations(source).map { it.name })
+    }
+
+    private companion object {
+        /** Обратный слэш строкой: в исходниках тестов он иначе съедается разбором. */
+        const val BACKSLASH = "\\"
+    }
 }

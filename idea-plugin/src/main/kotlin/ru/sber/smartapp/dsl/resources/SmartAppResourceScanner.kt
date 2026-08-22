@@ -91,7 +91,10 @@ object SmartAppResourceScanner {
                 val contentStart = i + quote.length
                 var j = contentStart
                 while (j < text.length) {
-                    if (text[j] == '\\' && !isRaw(prefix)) {
+                    // В Python обратный слэш не даёт кавычке завершить строку даже
+                    // в raw-литерале: для поиска конца это учитывается всегда, а
+                    // содержимое raw-строки при декодировании не меняется.
+                    if (text[j] == '\\') {
                         j += 2
                         continue
                     }
@@ -131,8 +134,6 @@ object SmartAppResourceScanner {
         // Больше трёх букв префикса в Python не бывает; иначе это конец идентификатора.
         return if (quote - start <= 3) start else quote
     }
-
-    private fun isRaw(prefix: String): Boolean = prefix.lowercase().contains("r")
 
     /**
      * Логические строки маскированного текста: перенос внутри скобок и хвостовой
@@ -213,6 +214,8 @@ object SmartAppResourceScanner {
         val isClass: Boolean,
         val cls: ClassDraft?,
         val method: MethodDraft?,
+        /** Отступ тела: у `def` — отступ первой строки тела, дальше он фиксирован. */
+        var bodyIndent: Int? = null,
     )
 
     /** Разбирает модуль настолько, насколько нужно для чтения ресурсов приложения. */
@@ -254,7 +257,12 @@ object SmartAppResourceScanner {
 
             val enclosing = stack.lastOrNull()
             val method = if (enclosing != null && !enclosing.isClass) enclosing.method else null
-            val insideResourceMethod = method != null &&
+            if (enclosing != null && enclosing.bodyIndent == null) enclosing.bodyIndent = line.indent
+            // Только прямые операторы тела метода. Строка глубже — это `if`,
+            // `for`, `try`, `with` или вложенный `def`: регистрация там условная,
+            // и принять её значило бы обещать слово, которого может не быть.
+            val directBodyLine = enclosing != null && enclosing.bodyIndent == line.indent
+            val insideResourceMethod = method != null && directBodyLine &&
                 method.name.startsWith(ResourceScanSpec.methodPrefix) &&
                 stack.size >= 2 && stack[stack.size - 2].isClass
 
@@ -398,11 +406,15 @@ object SmartAppResourceScanner {
                     val width = if (next == 'x') 2 else if (next == 'u') 4 else 8
                     if (i + width > content.length) return null
                     val code = content.substring(i, i + width).toIntOrNull(16) ?: return null
+                    if (code > 0x10FFFF) return null
                     out.appendCodePoint(code)
                     i += width
                 }
-                // Нераспознанный escape Python оставляет как есть — обе буквы.
-                else -> out.append('\\').append(next)
+                // Контракт escape сознательно узкий (см. план): восьмеричные
+                // последовательности, \a, \b, \f, \v, \N{...} не поддерживаются.
+                // Отвергаем регистрацию целиком: подставить не то имя хуже, чем
+                // не подставить никакого.
+                else -> return null
             }
         }
         return out.toString()
@@ -456,6 +468,9 @@ object SmartAppResourceScanner {
             if (braceClose < 0) continue
             for (literal in strings) {
                 if (literal.start < braceOpen || literal.end > braceClose) continue
+                // Только непосредственные ключи внешнего словаря: строка внутри
+                // вложенного объекта — не имя ключевого слова.
+                if (bracketDepthBetween(masked, braceOpen + 1, literal.start) != 0) continue
                 if (!masked.substring(literal.end, braceClose).trimStart().startsWith(":")) continue
                 val name = decodeString(text, literal) ?: continue
                 val value = text.substring(literal.end, braceClose)
@@ -472,6 +487,18 @@ object SmartAppResourceScanner {
             }
         }
         return result
+    }
+
+    /** Глубина вложенности скобок на участке [start, end) — 0 значит «верхний уровень». */
+    private fun bracketDepthBetween(masked: String, start: Int, end: Int): Int {
+        var depth = 0
+        for (i in start until end) {
+            when (masked[i]) {
+                '(', '[', '{' -> depth++
+                ')', ']', '}' -> depth--
+            }
+        }
+        return depth
     }
 
     /** Точечное имя из текста значения, если это оно; иначе подписи не будет. */

@@ -187,6 +187,67 @@ describe("цепочка наследования", () => {
   });
 });
 
+describe("обрыв цепочки", () => {
+  // Частичная цепочка дала бы слова, которые нечем подтвердить: любой обрыв,
+  // кроме библиотечной базы, гасит словарь целиком.
+  const chainOf = (files: Record<string, string>) => customKeywords(reader(files));
+
+  it("циклическая база", () => {
+    expect(
+      chainOf({
+        "app_config.py": CONFIG,
+        "app/resources/custom_app_resources.py":
+          "from app.resources.base import BaseResources\n\n" +
+          "class CustomAppResources(BaseResources):\n" +
+          '    def init_actions(self):\n        actions["custom"] = C\n',
+        "app/resources/base.py":
+          "from app.resources.custom_app_resources import CustomAppResources\n\n" +
+          "class BaseResources(CustomAppResources):\n" +
+          '    def init_actions(self):\n        actions["base"] = C\n',
+      }),
+    ).toEqual([]);
+  });
+
+  it("класс, которого нет в прочитанном модуле", () => {
+    expect(
+      chainOf({
+        "app_config.py": CONFIG,
+        "app/resources/custom_app_resources.py":
+          "from app.resources.base import BaseResources\n\n" +
+          "class CustomAppResources(BaseResources):\n" +
+          '    def init_actions(self):\n        actions["custom"] = C\n',
+        // Модуль есть и читается, а класса в нём нет — это не библиотечная база.
+        "app/resources/base.py": "class Other(SmartAppResources):\n    pass\n",
+      }),
+    ).toEqual([]);
+  });
+
+  it("слишком длинная цепочка", () => {
+    const files: Record<string, string> = { "app_config.py": CONFIG };
+    files["app/resources/custom_app_resources.py"] =
+      "from app.resources.b0 import R0\n\nclass CustomAppResources(R0):\n" +
+      '    def init_actions(self):\n        actions["custom"] = C\n';
+    for (let i = 0; i < 12; i++) {
+      files[`app/resources/b${i}.py`] =
+        `from app.resources.b${i + 1} import R${i + 1}\n\nclass R${i}(R${i + 1}):\n    pass\n`;
+    }
+    expect(chainOf(files)).toEqual([]);
+  });
+
+  it("библиотечная база — нормальный конец", () => {
+    expect(
+      chainOf({
+        "app_config.py": CONFIG,
+        "app/resources/custom_app_resources.py": cls(
+          "CustomAppResources",
+          "SmartAppResources",
+          '    def init_actions(self):\n        actions["custom"] = C',
+        ),
+      }).map((k) => k.name),
+    ).toEqual(["custom"]);
+  });
+});
+
 describe("исключённые каталоги", () => {
   it.each([
     ["venv/lib/resources.py", true],

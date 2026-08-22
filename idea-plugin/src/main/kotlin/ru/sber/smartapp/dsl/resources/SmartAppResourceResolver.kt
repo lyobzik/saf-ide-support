@@ -81,9 +81,14 @@ object SmartAppResourceResolver {
         module.replace('.', '/') + ResourceScanSpec.fileExtension
 
     /**
-     * Цепочка классов от базы к производному. `null` — цепочка непригодна: любое
-     * множественное наследование сканировать нельзя, потому что `super()` идёт
-     * по MRO, а библиотечная база сканеру не видна.
+     * Цепочка классов от базы к производному. `null` — цепочка непригодна, и
+     * тогда слов нет вовсе: частичная цепочка дала бы слова, которые нечем
+     * подтвердить.
+     *
+     * Нормальный конец ровно один: база, которую не удалось прочитать внутри
+     * приложения, — это библиотечный `SmartAppResources`. Всё остальное —
+     * множественное наследование, цикл, исчерпанная глубина и класс, которого
+     * нет в прочитанном модуле, — ошибка.
      */
     private fun resolveChain(start: ClassRef, read: ModuleReader): List<ChainEntry>? {
         val chain = ArrayList<ChainEntry>()
@@ -91,22 +96,24 @@ object SmartAppResourceResolver {
         var current: ClassRef? = start
         var depth = 0
 
-        while (current != null && depth < ResourceScanSpec.maxBaseDepth) {
-            depth++
+        while (current != null) {
+            if (depth++ >= ResourceScanSpec.maxBaseDepth) return null
             val ref = current
-            if (!visited.add("${ref.file}#${ref.name}")) break
+            if (!visited.add("${ref.file}#${ref.name}")) return null // циклический импорт
 
-            val text = readModule(read, ref.file) ?: break
+            val text = readModule(read, ref.file)
+                // Модуль вне приложения: это база фреймворка, дальше идти некуда.
+                // Но если так оборвался сам активный класс — подтверждать нечего.
+                ?: return if (chain.isEmpty()) null else chain.asReversed().toList()
             val module = SmartAppResourceScanner.parseModule(text)
-            val cls = module.classes.firstOrNull { it.name == ref.name } ?: break
+            val cls = module.classes.firstOrNull { it.name == ref.name } ?: return null
 
             chain.add(ChainEntry(cls, ref.file))
             if (cls.bases.size > 1) return null
             val base = cls.bases.firstOrNull()
             current = if (base == null) null else classRefOf(base, module, ref.file)
         }
-        chain.reverse() // от базы к производному — в порядке применения
-        return chain
+        return chain.asReversed().toList() // от базы к производному — в порядке применения
     }
 
     /** Текст модуля: сначала `a/b/c.py`, затем `a/b/c/__init__.py`. */

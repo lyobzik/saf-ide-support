@@ -153,3 +153,62 @@ describe("порядок применения снимков", () => {
     workspace.dispose();
   });
 });
+
+describe("жизненный цикл ресурсов приложения", () => {
+  beforeEach(() => workspaceControl.reset());
+
+  const appRoot = "file:///w/app_b";
+  const appDsl = `${appRoot}/static/references/actions/actions.json`;
+  const appConfig = `${appRoot}/app_config.py`;
+  const appResources = `${appRoot}/app/resources/custom.py`;
+  const resourcesText = (action: string): string =>
+    `class R(SmartAppResources):\n    def init_actions(self):\n        actions["${action}"] = C\n`;
+
+  it("новое приложение сканируется после активации", async () => {
+    // На старте приложения ещё нет: есть только чужой набор.
+    workspaceControl.files.set(formsUri, '{ "early_form": { "type": "form" } }');
+    const workspace = new SmartAppWorkspace();
+    await workspace.start();
+    expect(workspace.index.customKeywordsOf("w/app_b/static/references")).toEqual([]);
+
+    // Python-файлы приложения уже лежат на диске, а набор появляется сейчас.
+    workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
+    workspaceControl.files.set(appResources, resourcesText("late_action"));
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "late_action" } }');
+    workspaceControl.watchers[0]!.created.fire(Uri.parse(appDsl));
+
+    await waitFor(
+      () => workspace.index.customKeywordsOf("w/app_b/static/references").length > 0,
+    );
+    expect(
+      workspace.index.customKeywordsOf("w/app_b/static/references").map((k) => k.name),
+    ).toEqual(["late_action"]);
+    workspace.dispose();
+  });
+
+  it("закрытие несохранённого Python-файла возвращает содержимое диска", async () => {
+    workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
+    workspaceControl.files.set(appResources, resourcesText("saved_action"));
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "saved_action" } }');
+
+    const workspace = new SmartAppWorkspace();
+    await workspace.start();
+    const names = () =>
+      workspace.index.customKeywordsOf("w/app_b/static/references").map((k) => k.name);
+    expect(names()).toEqual(["saved_action"]);
+
+    // Правка в редакторе видна сразу, до сохранения.
+    workspace.index.upsert(appResources, resourcesText("unsaved_action"));
+    expect(names()).toEqual(["unsaved_action"]);
+
+    // Закрытие без сохранения обязано вернуть словарь к диску.
+    workspaceControl.fireClose({
+      uri: Uri.parse(appResources),
+      getText: () => resourcesText("unsaved_action"),
+      isDirty: false,
+    } as never);
+    await waitFor(() => names()[0] === "saved_action");
+    expect(names()).toEqual(["saved_action"]);
+    workspace.dispose();
+  });
+});

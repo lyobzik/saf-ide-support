@@ -86,34 +86,49 @@ interface ChainEntry {
 }
 
 /**
- * Цепочка классов от базы к производному. `undefined` — цепочка непригодна:
- * любое множественное наследование сканировать нельзя, потому что `super()`
- * идёт по MRO, а библиотечная база сканеру не видна.
+ * Цепочка классов от базы к производному. `undefined` — цепочка непригодна, и
+ * тогда слов нет вовсе: частичная цепочка дала бы слова, которые нечем
+ * подтвердить.
+ *
+ * Нормальный конец ровно один: база, которую не удалось прочитать внутри
+ * приложения, — это библиотечный `SmartAppResources`. Всё остальное —
+ * множественное наследование, цикл, исчерпанная глубина и класс, которого нет в
+ * прочитанном модуле, — ошибка.
  */
 function resolveChain(start: ClassRef, read: ModuleReader): ChainEntry[] | undefined {
   const chain: ChainEntry[] = [];
   const visited = new Set<string>();
   let current: ClassRef | undefined = start;
+  let depth = 0;
 
-  for (let depth = 0; current !== undefined && depth < resourceScan.maxBaseDepth; depth++) {
+  while (current !== undefined) {
+    if (depth++ >= resourceScan.maxBaseDepth) return undefined;
     const key = `${current.file}#${current.name}`;
-    if (visited.has(key)) break;
+    if (visited.has(key)) return undefined; // циклический импорт
     visited.add(key);
 
     const text = readModule(read, current.file);
-    if (text === undefined) break;
+    if (text === undefined) {
+      // Модуль вне приложения: это база фреймворка, дальше идти некуда. Но если
+      // так оборвался сам активный класс — подтверждать нечего.
+      return chain.length === 0 ? undefined : finish(chain);
+    }
     const module = parseModule(text);
     const name: string = current.name;
     const cls: PyClass | undefined = module.classes.find((candidate) => candidate.name === name);
-    if (cls === undefined) break;
+    if (cls === undefined) return undefined;
 
     chain.push({ cls, file: current.file });
     if (cls.bases.length > 1) return undefined;
     const base: string | undefined = cls.bases[0];
     current = base === undefined ? undefined : classRefOf(base, module, current.file);
   }
-  chain.reverse(); // от базы к производному — в порядке применения
-  return chain;
+  return finish(chain);
+}
+
+/** Цепочка в порядке применения: от базы к производному. */
+function finish(chain: ChainEntry[]): ChainEntry[] {
+  return [...chain].reverse();
 }
 
 /** Текст модуля: сначала `a/b/c.py`, затем `a/b/c/__init__.py`. */

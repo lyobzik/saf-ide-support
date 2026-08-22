@@ -29,6 +29,14 @@ export class SmartAppWorkspace implements vscode.Disposable {
   private readonly pending = new Map<string, NodeJS.Timeout>();
   private readonly onIndexed = new vscode.EventEmitter<void>();
 
+  /**
+   * Корни приложений, для которых Python уже просканирован. Новый набор
+   * `static/references` может появиться после активации, а Python-файлы в нём
+   * — лежать давно: без повторного скана слова такого приложения не появились
+   * бы до ручной правки .py.
+   */
+  private readonly scannedRoots = new Set<string>();
+
   /** Срабатывает после изменения индекса — подписчики пересчитывают диагностику. */
   readonly onDidUpdate = this.onIndexed.event;
 
@@ -64,6 +72,9 @@ export class SmartAppWorkspace implements vscode.Disposable {
       // работает по PSI незасохранённого документа.
       vscode.workspace.onDidChangeTextDocument((event) => this.scheduleFromDocument(event.document)),
       vscode.workspace.onDidOpenTextDocument((document) => this.scheduleFromDocument(document)),
+      // Закрытие без сохранения возвращает индекс к содержимому диска: иначе
+      // слово, добавленное и не сохранённое, осталось бы в словаре навсегда.
+      vscode.workspace.onDidCloseTextDocument((document) => void this.restoreFromDisk(document)),
     );
 
     const files = await vscode.workspace.findFiles(FILE_GLOB);
@@ -71,8 +82,7 @@ export class SmartAppWorkspace implements vscode.Disposable {
 
     // Python сканируется после DSL: корни приложений известны только по
     // найденным наборам static/references.
-    const pythonFiles = await vscode.workspace.findFiles(PYTHON_GLOB, PYTHON_EXCLUDE);
-    await Promise.all(pythonFiles.map((uri) => this.reloadPython(uri)));
+    await this.scanPython();
 
     // Уже открытые документы могли измениться до активации расширения: их
     // содержимое в редакторе новее того, что лежит на диске.
@@ -115,6 +125,36 @@ export class SmartAppWorkspace implements vscode.Disposable {
       // Файл исчез или недоступен — просто убираем его из индекса.
       this.forget(uri);
     }
+  }
+
+  /**
+   * Сканирует Python-файлы, если появился корень приложения, которого раньше не
+   * было. Перечитываются все найденные файлы: цепочка ресурсов собирается из
+   * нескольких модулей, и какие из них относятся к новому корню, заранее не
+   * известно.
+   */
+  private async scanPython(notify = false): Promise<void> {
+    const roots = this.index.applicationRoots();
+    const fresh = [...roots].filter((root) => !this.scannedRoots.has(root));
+    if (fresh.length === 0) return;
+    for (const root of fresh) this.scannedRoots.add(root);
+
+    const files = await vscode.workspace.findFiles(PYTHON_GLOB, PYTHON_EXCLUDE);
+    await Promise.all(files.map((uri) => this.reloadPython(uri)));
+    if (notify) this.onIndexed.fire();
+  }
+
+  /** Возвращает файл к содержимому диска после закрытия несохранённого документа. */
+  private async restoreFromDisk(document: vscode.TextDocument): Promise<void> {
+    const key = document.uri.toString();
+    if (!isDslFile(key) && !isPythonFile(key)) return;
+    const scheduled = this.pending.get(key);
+    if (scheduled !== undefined) {
+      clearTimeout(scheduled);
+      this.pending.delete(key);
+    }
+    if (isPythonFile(key)) await this.reloadPython(document.uri, true);
+    else await this.reload(document.uri, true);
   }
 
   /** Перечитывает Python-файл приложения: его содержимое нужно целиком. */
@@ -190,6 +230,7 @@ export class SmartAppWorkspace implements vscode.Disposable {
     this.nextGeneration(uri);
     this.texts.set(uri, text);
     this.index.upsert(uri, text);
+    if (isDslFile(uri)) void this.scanPython(notify);
     if (notify) this.onIndexed.fire();
   }
 }

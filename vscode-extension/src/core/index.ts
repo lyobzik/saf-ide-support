@@ -110,6 +110,13 @@ export class SmartAppIndex {
    * обновить «только изменившийся файл» было бы неверно.
    */
   private readonly customCache = new Map<string, readonly CustomKeyword[]>();
+
+  /**
+   * Снимок множества корней приложений. Появление нового корня (в том числе
+   * вложенного) меняет владельца Python-файлов, поэтому пересчитанный словарь
+   * соседей тоже становится неверным — кэш сбрасывается целиком.
+   */
+  private rootsSignature: string | undefined;
   private ready = false;
 
   /**
@@ -130,6 +137,7 @@ export class SmartAppIndex {
     this.assets.clear();
     this.pythonTexts.clear();
     this.customCache.clear();
+    this.rootsSignature = undefined;
     this.ready = false;
   }
 
@@ -155,6 +163,11 @@ export class SmartAppIndex {
     for (const entry of this.files.values()) {
       if (entry.scopeRoot !== undefined) roots.add(applicationRootOf(entry.scopeRoot));
     }
+    const signature = [...roots].sort().join("\n");
+    if (signature !== this.rootsSignature) {
+      this.rootsSignature = signature;
+      this.customCache.clear();
+    }
     return roots;
   }
 
@@ -166,11 +179,13 @@ export class SmartAppIndex {
    */
   customKeywordsOf(scopeRoot: string | undefined): readonly CustomKeyword[] {
     if (scopeRoot === undefined) return [];
+    // Корни считаются первыми: их изменение сбрасывает кэш, и только после
+    // этого можно смотреть в него.
+    const roots = this.applicationRoots();
     const appRoot = applicationRootOf(scopeRoot);
     const cached = this.customCache.get(appRoot);
     if (cached !== undefined) return cached;
 
-    const roots = this.applicationRoots();
     const resolved = customKeywords((relative) => {
       const path = appRoot.length === 0 ? relative : `${appRoot}/${relative}`;
       if (ownerApplicationRoot(path, roots) !== appRoot) return undefined;
