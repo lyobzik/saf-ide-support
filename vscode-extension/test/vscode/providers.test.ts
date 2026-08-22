@@ -176,6 +176,85 @@ describe("DefinitionProvider поверх настоящего SmartAppWorkspace
   });
 });
 
+describe("навигация к регистрации ключевого слова поверх настоящего SmartAppWorkspace", () => {
+  // Цель перехода — строка Python-файла, а не JSON: позицию считает адаптер по
+  // тексту этого файла, и ошибка перевода смещения в Position видна только тут.
+  const appRoot = "file:///app";
+  const configUri = `${appRoot}/app_config.py`;
+  const resourcesUri = `${appRoot}/app/resources/custom.py`;
+  const actionsUri = `${appRoot}/static/references/actions/actions.json`;
+
+  const config = ["from app.resources.custom import AppResources", "RESOURCES = AppResources", ""].join("\n");
+  const resources = [
+    "from smart_kit.resources import SmartAppResources",
+    "",
+    "",
+    "class AppResources(SmartAppResources):",
+    '    """Ресурсы приложения."""',
+    "",
+    "    def init_actions(self):",
+    "        super().init_actions()",
+    '        actions["custom_action"] = CustomAction',
+    "",
+  ].join("\n");
+  const actions = ["{", '  "greet": {', '    "type": "custom_action"', "  }", "}"].join("\n");
+
+  const started = async (): Promise<SmartAppWorkspace> => {
+    workspaceControl.reset();
+    workspaceControl.files.set(configUri, config);
+    workspaceControl.files.set(resourcesUri, resources);
+    workspaceControl.files.set(actionsUri, actions);
+    const scanned = new SmartAppWorkspace();
+    // start() сам дожидается сканирования Python и только потом помечает индекс
+    // готовым — отдельного ожидания тесту не нужно.
+    await scanned.start();
+    return scanned;
+  };
+
+  it("ведёт на строку регистрации в Python-файле", async () => {
+    const scanned = await started();
+    const provider = createDefinitionProvider(scanned);
+    const locations = (await provider.provideDefinition(
+      doc(actionsUri, actions),
+      positionOf(actions, '"custom_action"', 2),
+      undefined as never,
+    )) as unknown as vscodeMock.Location[];
+
+    expect(locations).toHaveLength(1);
+    expect(locations[0]?.uri.toString()).toBe(resourcesUri);
+    expect(locations[0]?.range.start.line).toBe(8);
+    expect(
+      lineOf(resources, 8).slice(
+        locations[0]!.range.start.character,
+        locations[0]!.range.end.character,
+      ),
+    ).toBe("custom_action");
+    scanned.dispose();
+  });
+
+  it("использования того же слова возвращаются с диапазоном в JSON", async () => {
+    const scanned = await started();
+    const provider = createReferenceProvider(scanned);
+    const locations = (await provider.provideReferences(
+      doc(actionsUri, actions),
+      positionOf(actions, '"custom_action"', 2),
+      { includeDeclaration: false },
+      undefined as never,
+    )) as unknown as vscodeMock.Location[];
+
+    expect(locations).toHaveLength(1);
+    expect(locations[0]?.uri.toString()).toBe(actionsUri);
+    expect(locations[0]?.range.start.line).toBe(2);
+    expect(
+      lineOf(actions, 2).slice(
+        locations[0]!.range.start.character,
+        locations[0]!.range.end.character,
+      ),
+    ).toBe("custom_action");
+    scanned.dispose();
+  });
+});
+
 describe("ReferenceProvider", () => {
   it("находит использование поля из его определения", async () => {
     const provider = createReferenceProvider(workspace);

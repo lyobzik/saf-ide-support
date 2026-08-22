@@ -46,6 +46,9 @@
             language="JSON"
             implementationClass="ru.sber.smartapp.dsl.findusages.SmartAppFindUsagesProvider"/>
 
+        <findUsagesHandlerFactory
+            implementation="ru.sber.smartapp.dsl.findusages.SmartAppFindUsagesHandlerFactory"/>
+
         <elementDescriptionProvider
             implementation="ru.sber.smartapp.dsl.findusages.SmartAppElementDescriptionProvider"/>
 

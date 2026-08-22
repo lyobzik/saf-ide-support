@@ -2,7 +2,7 @@ import { KIND, fieldAccess, type RefKind } from "./contract";
 import { propertyName, propertyOf, stringNodeAt, type Node } from "./ast";
 import { isJinja } from "./jinja";
 import { targetKinds } from "./refRules";
-import { fieldHits, type DocumentContext } from "./semantics";
+import { fieldHits, registrationsAt, type DocumentContext } from "./semantics";
 import type { SmartAppIndex } from "./index";
 
 /**
@@ -90,6 +90,17 @@ export function renameLookupAt(
         },
       };
     }
+  }
+
+  // Ключевое слово, зарегистрированное приложением: имя живёт и в Python-коде,
+  // и в значениях `type` всех файлов приложения. Согласованно переписать их мы
+  // не умеем, поэтому отказ с объяснением — тот же, что в плагине IDEA.
+  if (registrationsAt(index, context, node).length > 0) {
+    return {
+      reason:
+        `Ключевое слово '${value}' зарегистрировано в Python-коде приложения; ` +
+        "переименование не поддерживается",
+    };
   }
 
   // Ссылка на сущность. Правило может допускать несколько видов сразу

@@ -6,6 +6,7 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.GlobalSearchScopesCore
+import com.intellij.psi.search.ProjectScope
 
 /**
  * Области поиска для межфайлового резолва SmartApp DSL. Резолв и автодополнение
@@ -26,4 +27,19 @@ object SmartAppScopes {
 
     fun forPsiFile(psiFile: PsiFile): GlobalSearchScope =
         forFile(psiFile.project, psiFile.virtualFile)
+
+    /**
+     * Каталог приложения целиком — и `static/references`, и Python-файлы рядом
+     * с ним. Нужен поиску использований ключевых слов, зарегистрированных
+     * приложением: набор `references` для него слишком узок.
+     *
+     * Пересечение с content scope отсекает библиотеки, но не виртуальное
+     * окружение внутри самого приложения — исключённые каталоги отбираются
+     * отдельно ([SmartAppCustomKeywords.hasExcludedSegment]). Вложенное
+     * приложение (`subapp`) в каталог входит, поэтому владение проверяется
+     * фильтром: scope отвечает за скорость, фильтр — за корректность.
+     */
+    fun applicationScope(project: Project, appRoot: VirtualFile): GlobalSearchScope =
+        GlobalSearchScopesCore.directoryScope(project, appRoot, true)
+            .intersectWith(ProjectScope.getContentScope(project))
 }

@@ -17,7 +17,7 @@ import {
   type Node,
   type ParsedDocument,
 } from "./ast";
-import { kindOf, referencesRoot } from "./files";
+import { applicationRootOf, kindOf, referencesRoot } from "./files";
 import { isJinja } from "./jinja";
 import type { CustomKeyword } from "./resourceKeywords";
 import { decode, rawText } from "./jsonDecode";
@@ -73,12 +73,22 @@ export interface FileTarget extends Location {
   readonly target: "file";
 }
 
+/**
+ * Строка, где приложение зарегистрировало ключевое слово в своём Python-коде.
+ * Диапазон — имя без кавычек, в сырых координатах Python-файла.
+ */
+export interface RegistrationTarget extends Location {
+  readonly target: "registration";
+  readonly category: string;
+  readonly name: string;
+}
+
 /** Определения, на которые ведёт позиция offset. */
 export function definitionsAt(
   index: SmartAppIndex,
   context: DocumentContext,
   offset: number,
-): (Definition | FieldDefinition | FileTarget)[] {
+): (Definition | FieldDefinition | FileTarget | RegistrationTarget)[] {
   if (!index.isReady() || context.kind === undefined) return [];
 
   const node = stringNodeAt(context.parsed.root, offset);
@@ -99,6 +109,11 @@ export function definitionsAt(
     const uri = index.findFile(candidateUris(node, value, context.scopeRoot));
     return uri === undefined ? [] : [{ target: "file", uri, start: 0, end: 0 }];
   }
+
+  // Значение `type`: слово может быть зарегистрировано самим приложением —
+  // тогда переход ведёт на строку регистрации в его Python-коде.
+  const registrations = registrationsAt(index, context, node);
+  if (registrations.length > 0) return registrations;
 
   const kinds = targetKinds(node, context.kind);
   if (kinds.length === 0) return [];
@@ -146,6 +161,15 @@ export function referencesAt(
       fieldOwner.field,
       includeDeclaration,
     );
+  }
+
+  // Каретка на значении `type`, зарегистрированном приложением: вхождения
+  // ищутся по всему приложению, а объявление — строка регистрации в Python.
+  const registrations = registrationsAt(index, context, node);
+  if (registrations.length > 0 && context.scopeRoot !== undefined) {
+    const categories = new Set(registrations.map((registration) => registration.category));
+    const usages = index.findKeywordUsages(value, categories, applicationRootOf(context.scopeRoot));
+    return includeDeclaration ? dedupe([...usages, ...registrations]) : usages;
   }
 
   // Каретка на ссылке: показываем все её вхождения.
@@ -214,6 +238,49 @@ export function diagnostics(index: SmartAppIndex, context: DocumentContext): Dia
   });
 
   return result;
+}
+
+/**
+ * Регистрации приложения, на которые ведёт значение `type` под узлом [node].
+ *
+ * Категория позиции сужает выбор: слово одной категории не ведёт в регистрацию
+ * другой. Нераспознанная категория целями не ограничивает — ровно как подсветка
+ * в этом случае откатывается к словарю целиком.
+ */
+export function registrationsAt(
+  index: SmartAppIndex,
+  context: DocumentContext,
+  node: Node,
+): RegistrationTarget[] {
+  if (context.scopeRoot === undefined || !isTypeValue(node)) return [];
+  const value = node.value as string;
+  if (value.length === 0) return [];
+
+  const category = keywordCategoryAt(node, context.kind);
+  const appRoot = applicationRootOf(context.scopeRoot);
+  const targets: RegistrationTarget[] = [];
+  for (const keyword of index.customKeywordsOf(context.scopeRoot)) {
+    if (keyword.name !== value) continue;
+    if (category !== undefined && keyword.category !== category) continue;
+    const uri = index.registrationUri(appRoot, keyword.file);
+    if (uri === undefined) continue;
+    targets.push({
+      target: "registration",
+      uri,
+      start: keyword.nameStart,
+      end: keyword.nameEnd,
+      category: keyword.category,
+      name: keyword.name,
+    });
+  }
+  return targets;
+}
+
+/** Узел стоит в позиции значения свойства `type`. */
+function isTypeValue(node: Node): boolean {
+  const property = propertyOf(node);
+  if (property === undefined || propertyValue(property) !== node) return false;
+  return propertyName(property) === typeContext.typeProperty;
 }
 
 /** Категория ключевых слов для значения type, если узел стоит в этой позиции. */

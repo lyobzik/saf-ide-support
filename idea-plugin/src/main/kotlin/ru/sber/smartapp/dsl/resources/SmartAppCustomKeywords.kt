@@ -38,7 +38,11 @@ object SmartAppCustomKeywords {
     fun of(file: PsiFile): List<CustomKeyword> {
         val virtualFile = file.virtualFile ?: return emptyList()
         val appRoot = applicationRoot(virtualFile) ?: return emptyList()
-        val project = file.project
+        return ofRoot(file.project, appRoot)
+    }
+
+    /** Слова приложения с корнем [appRoot]. */
+    fun ofRoot(project: Project, appRoot: VirtualFile): List<CustomKeyword> {
         val directory = PsiManager.getInstance(project).findDirectory(appRoot) ?: return emptyList()
 
         // Провайдер не должен удерживать PSI (платформа проверяет это явно),
@@ -65,6 +69,73 @@ object SmartAppCustomKeywords {
         repeat(PathSpec.rootSegments.size) { root = root.parent ?: return null }
         return root
     }
+
+    /**
+     * Корень приложения для **любого** файла — не только DSL-файла: ближайший
+     * каталог-предок, внутри которого лежит набор `static/references`. То же
+     * правило, что у [ownedBy]: вложенный `subapp` — отдельное приложение.
+     */
+    fun ownerApplicationRoot(file: VirtualFile): VirtualFile? {
+        var directory = if (file.isDirectory) file else file.parent
+        while (directory != null) {
+            if (directory.findFileByRelativePath(REFERENCES_PATH) != null) return directory
+            directory = directory.parent
+        }
+        return null
+    }
+
+    /**
+     * Лежит ли [file] внутри исключённого каталога приложения (`venv`,
+     * `site-packages`, …). Проверяются сегменты **ниже** [appRoot]: путь до
+     * самого приложения — дело пользователя, а не признак зависимости.
+     */
+    fun hasExcludedSegment(file: VirtualFile, appRoot: VirtualFile): Boolean {
+        var directory = file.parent
+        while (directory != null && directory != appRoot) {
+            if (directory.name in ResourceScanSpec.excludedDirs) return true
+            directory = directory.parent
+        }
+        return false
+    }
+
+    /**
+     * Регистрации приложения, которому принадлежит [dslFile], как элементы для
+     * навигации и поиска использований.
+     *
+     * Элементы создаются на каждый запрос: сам словарь кэширован платформой, а
+     * fake-элемент — тонкая обёртка над записью словаря, удерживать её в кэше
+     * значило бы удерживать PSI.
+     */
+    fun registrations(dslFile: PsiFile): List<SmartAppRegistrationElement> {
+        val virtualFile = dslFile.virtualFile ?: return emptyList()
+        val appRoot = applicationRoot(virtualFile) ?: return emptyList()
+        return registrationsOfRoot(dslFile.project, appRoot)
+    }
+
+    /**
+     * Регистрации приложения с корнем [appRoot]. Отдельно от [registrations]
+     * нужны направлению «каретка в Python-файле»: DSL-файла под рукой там нет,
+     * а корень приложения известен.
+     */
+    fun registrationsOfRoot(project: Project, appRoot: VirtualFile): List<SmartAppRegistrationElement> =
+        elementsOf(project, appRoot, ofRoot(project, appRoot))
+
+    private fun elementsOf(
+        project: Project,
+        appRoot: VirtualFile,
+        keywords: List<CustomKeyword>,
+    ): List<SmartAppRegistrationElement> {
+        val manager = PsiManager.getInstance(project)
+        val files = HashMap<String, PsiFile?>()
+        return keywords.mapNotNull { keyword ->
+            val file = files.getOrPut(keyword.file) {
+                appRoot.findFileByRelativePath(keyword.file)?.let { manager.findFile(it) }
+            } ?: return@mapNotNull null
+            SmartAppRegistrationElement(file, keyword)
+        }
+    }
+
+    private val REFERENCES_PATH: String = PathSpec.rootSegments.joinToString("/")
 
     private fun compute(project: Project, appRoot: VirtualFile): List<CustomKeyword> =
         SmartAppResourceResolver.customKeywords(
@@ -98,7 +169,7 @@ object SmartAppCustomKeywords {
     private fun ownedBy(file: VirtualFile, appRoot: VirtualFile): Boolean {
         var directory = file.parent
         while (directory != null) {
-            if (directory.findFileByRelativePath(PathSpec.rootSegments.joinToString("/")) != null) {
+            if (directory.findFileByRelativePath(REFERENCES_PATH) != null) {
                 return directory == appRoot
             }
             if (directory == appRoot) return true

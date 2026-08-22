@@ -20,7 +20,9 @@ import ru.sber.smartapp.dsl.reference.JsonStringLiteralDecoder.rawText
  *    выражений Jinja: и в интерполяциях `{{ … }}`, и в statement-тегах
  *    `{% … %}`;
  *  - [SmartAppFormVariableReference] — ссылка с самой переменной `main_form`
- *    на определение целевой формы.
+ *    на определение целевой формы;
+ *  - [SmartAppCustomKeywordReference] — ссылка со значения `type` на строку, где
+ *    приложение зарегистрировало это ключевое слово в своём Python-коде.
  *
  * Семантические ссылки создаются только для **значений** свойств (не для
  * JSON-ключей): `"value": "{{ main_form.name }}"` резолвится, а
@@ -48,8 +50,16 @@ class SmartAppReferenceContributor : PsiReferenceContributor() {
                         if (SmartAppFileRefRules.isFileReference(literal)) {
                             return arrayOf(SmartAppFileReference(literal))
                         }
-                        if (!SmartAppRefRules.isReference(literal)) return PsiReference.EMPTY_ARRAY
-                        return arrayOf(SmartAppReference(literal))
+                        if (SmartAppRefRules.isReference(literal)) {
+                            return arrayOf(SmartAppReference(literal))
+                        }
+                        // Значение `type`: ключевое слово может быть
+                        // зарегистрировано самим приложением — тогда у него есть
+                        // строка в Python-коде, и переход ведёт туда.
+                        if (SmartAppCustomKeywordReference.isTypeValue(literal)) {
+                            return arrayOf(SmartAppCustomKeywordReference(literal))
+                        }
+                        return PsiReference.EMPTY_ARRAY
                     }
 
                     // Иначе — семантические ссылки на поля формы внутри интерполяции.

@@ -173,6 +173,20 @@ export function hasExcludedSegment(path: string): boolean {
   return path.split("/").some((segment) => resourceScan.excludedDirs.has(segment));
 }
 
+/**
+ * Лежит ли файл [path] внутри каталога-зависимости приложения [appRoot].
+ * Проверяются сегменты **ниже** корня приложения: путь до самого приложения —
+ * дело пользователя, а не признак зависимости. Порт
+ * `SmartAppCustomKeywords.hasExcludedSegment`.
+ */
+export function hasExcludedDirBelow(path: string, appRoot: string): boolean {
+  const relative = appRoot.length === 0 ? path : path.slice(appRoot.length + 1);
+  const segments = relative.split("/");
+  // Последний сегмент — имя файла, каталогом он не является.
+  segments.pop();
+  return segments.some((segment) => resourceScan.excludedDirs.has(segment));
+}
+
 /** Ключ словаря действующих регистраций: пара «категория + имя», без склейки строк. */
 const keyOf = (category: string, name: string): string => JSON.stringify([category, name]);
 

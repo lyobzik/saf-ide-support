@@ -1,0 +1,9 @@
+{
+  "main": {
+    "actions": [
+      {
+        "type": "custom_action"
+      }
+    ]
+  }
+}

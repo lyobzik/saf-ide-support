@@ -1,0 +1,63 @@
+{
+  "description": "Ключевое слово, зарегистрированное приложением: переход со значения type на строку регистрации в Python и вхождения по всему приложению",
+  "definitions": [
+    {
+      "file": "static/references/actions/actions.json",
+      "anchor": "custom_action",
+      "targets": [
+        {
+          "file": "app/resources/custom_app_resources.py",
+          "line": 8,
+          "column": 17,
+          "rangeText": "custom_action"
+        }
+      ]
+    }
+  ],
+  "references": [
+    {
+      "file": "static/references/actions/actions.json",
+      "anchor": "custom_action",
+      "includeDeclaration": false,
+      "targets": [
+        {
+          "file": "static/references/actions/actions.json",
+          "line": 2,
+          "column": 13,
+          "rangeText": "custom_action"
+        },
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 4,
+          "column": 17,
+          "rangeText": "custom_action"
+        }
+      ]
+    },
+    {
+      "file": "static/references/actions/actions.json",
+      "anchor": "custom_action",
+      "includeDeclaration": true,
+      "targets": [
+        {
+          "file": "static/references/actions/actions.json",
+          "line": 2,
+          "column": 13,
+          "rangeText": "custom_action"
+        },
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 4,
+          "column": 17,
+          "rangeText": "custom_action"
+        },
+        {
+          "file": "app/resources/custom_app_resources.py",
+          "line": 8,
+          "column": 17,
+          "rangeText": "custom_action"
+        }
+      ]
+    }
+  ]
+}

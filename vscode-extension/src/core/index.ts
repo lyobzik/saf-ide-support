@@ -4,6 +4,7 @@ import {
   isValueNode,
   parseDocument,
   propertyName,
+  propertyOf,
   propertyValue,
   topLevelProperties,
   type Node,
@@ -16,8 +17,14 @@ import {
   pathSegments,
   referencesRoot,
 } from "./files";
-import { customKeywords, hasExcludedSegment, type CustomKeyword } from "./resourceKeywords";
-import { resourceScan } from "./contract";
+import {
+  customKeywords,
+  hasExcludedDirBelow,
+  hasExcludedSegment,
+  type CustomKeyword,
+} from "./resourceKeywords";
+import { resourceScan, typeContext } from "./contract";
+import { categoryFor } from "./typeContext";
 import { indexEligibility } from "./indexGate";
 import { isJinja } from "./jinja";
 import { decode, rawText } from "./jsonDecode";
@@ -71,6 +78,23 @@ export interface FieldUsage extends Location {
   readonly field: string;
 }
 
+/**
+ * Значение `type` — позиция ключевого слова. Хранится вместе с категорией
+ * позиции: одноимённые слова разных категорий — разные слова, а
+ * `undefined` (контекст не распознан) совпадает с любой категорией, ровно как
+ * при резолве и подсветке.
+ */
+export interface KeywordUsage extends Location {
+  readonly name: string;
+  readonly category: string | undefined;
+}
+
+/** Python-файл приложения: URI нужен для позиции регистрации, текст — сканеру. */
+interface PythonFile {
+  readonly uri: string;
+  readonly text: string;
+}
+
 interface FileEntry {
   readonly uri: string;
   readonly scopeRoot: string | undefined;
@@ -79,6 +103,7 @@ interface FileEntry {
   readonly fields: FieldDefinition[];
   readonly usages: Usage[];
   readonly fieldUsages: FieldUsage[];
+  readonly keywordUsages: KeywordUsage[];
 }
 
 const inScope = (entry: FileEntry, scopeRoot: string | undefined): boolean =>
@@ -102,7 +127,7 @@ export class SmartAppIndex {
    * Тексты Python-файлов приложений: словарь ключевых слов — свойство навыка,
    * и собрать его можно только прочитав цепочку от `RESOURCES`.
    */
-  private readonly pythonTexts = new Map<string, string>();
+  private readonly pythonTexts = new Map<string, PythonFile>();
 
   /**
    * Разобранный словарь по корням приложений. Сбрасывается целиком при любом
@@ -162,7 +187,7 @@ export class SmartAppIndex {
 
   /** Добавляет или заменяет текст Python-файла приложения. */
   upsertPython(uri: string, text: string): void {
-    this.pythonTexts.set(pathKey(uri), text);
+    this.pythonTexts.set(pathKey(uri), { uri, text });
     this.customCache.clear();
   }
 
@@ -215,7 +240,7 @@ export class SmartAppIndex {
     const resolved = customKeywords({
       read: (relative) => {
         const path = absolute(relative);
-        return owned(path) ? this.pythonTexts.get(path) : undefined;
+        return owned(path) ? this.pythonTexts.get(path)?.text : undefined;
       },
       // Существование модуля или пакета видно по известным индексу файлам:
       // отдельного обхода файловой системы у ядра нет и быть не должно.
@@ -306,6 +331,7 @@ export class SmartAppIndex {
       fields: [],
       usages: [],
       fieldUsages: [],
+      keywordUsages: [],
     };
 
     // Определения — под гейтом строгости: битый файл не должен «подарить»
@@ -411,6 +437,43 @@ export class SmartAppIndex {
     return result;
   }
 
+  /**
+   * URI Python-файла [relative] (путь относительно корня приложения [appRoot]),
+   * если такой файл известен индексу. Нужен позиции регистрации: сама запись
+   * словаря знает только путь внутри приложения.
+   */
+  registrationUri(appRoot: string, relative: string): string | undefined {
+    const path = appRoot.length === 0 ? relative : `${appRoot}/${relative}`;
+    return this.pythonTexts.get(path)?.uri;
+  }
+
+  /**
+   * Вхождения ключевого слова [name] в DSL-файлах приложения [appRoot].
+   *
+   * Область — приложение целиком, а не набор `references`: слово регистрируется
+   * в его Python-коде и живёт во всех его файлах. Вложенное приложение —
+   * чужое (у него другой корень), каталоги-зависимости исключаются: набор
+   * внутри `venv` выглядит настоящим, но принадлежит библиотеке.
+   */
+  findKeywordUsages(
+    name: string,
+    categories: ReadonlySet<string>,
+    appRoot: string,
+  ): Location[] {
+    const result: Location[] = [];
+    for (const entry of this.files.values()) {
+      if (entry.scopeRoot === undefined) continue;
+      if (applicationRootOf(entry.scopeRoot) !== appRoot) continue;
+      if (hasExcludedDirBelow(pathKey(entry.uri), appRoot)) continue;
+      for (const usage of entry.keywordUsages) {
+        if (usage.name !== name) continue;
+        if (usage.category !== undefined && !categories.has(usage.category)) continue;
+        result.push({ uri: usage.uri, start: usage.start, end: usage.end });
+      }
+    }
+    return result;
+  }
+
   /** Все проиндексированные DSL-файлы — для отладки и тестов. */
   indexedUris(): string[] {
     return [...this.files.keys()];
@@ -499,19 +562,27 @@ function collectUsages(parsed: ParsedDocument, kind: RefKind, uri: string, entry
       collectFieldUsages(node, parsed.text, kind, uri, entry);
       return;
     }
-    const kinds = targetKinds(node, kind);
-    if (kinds.length === 0 || value.length === 0) return;
+    if (value.length === 0) return;
     // Диапазон — имя без кавычек: в IDEA ссылка живёт в `rangeInElement`
     // литерала, и именно её подсвечивает Find Usages. Диагностика, наоборот,
     // покрывает литерал целиком и считается отдельно.
     const start = node.offset + 1;
-    entry.usages.push({
-      uri,
-      start,
-      end: Math.max(start, node.offset + node.length - 1),
-      kinds,
-      name: value,
-    });
+    const end = Math.max(start, node.offset + node.length - 1);
+
+    const kinds = targetKinds(node, kind);
+    if (kinds.length > 0) {
+      entry.usages.push({ uri, start, end, kinds, name: value });
+      return;
+    }
+
+    // Значение `type`: слово может быть зарегистрировано самим приложением, и
+    // тогда эта позиция — его использование. Позиции собираются всегда, а не
+    // только для известных слов: словарь приложения меняется правкой Python, а
+    // индекс JSON от неё не зависит.
+    const property = propertyOf(node);
+    if (property === undefined || propertyValue(property) !== node) return;
+    if (propertyName(property) !== typeContext.typeProperty) return;
+    entry.keywordUsages.push({ uri, start, end, name: value, category: categoryFor(property, kind) });
   });
 }
 

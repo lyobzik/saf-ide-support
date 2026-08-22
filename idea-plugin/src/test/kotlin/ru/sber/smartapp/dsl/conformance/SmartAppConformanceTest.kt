@@ -14,9 +14,12 @@ import com.intellij.codeInsight.CodeInsightSettings
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import ru.sber.smartapp.dsl.SmartAppRefKind
 import ru.sber.smartapp.dsl.completion.SmartAppCompletionKind
+import ru.sber.smartapp.dsl.SmartAppFiles
 import ru.sber.smartapp.dsl.SmartAppScopes
 import ru.sber.smartapp.dsl.highlight.SmartAppTextAttributes
 import ru.sber.smartapp.dsl.index.SmartAppNameIndex
+import ru.sber.smartapp.dsl.findusages.SmartAppCustomKeywordTargets
+import ru.sber.smartapp.dsl.reference.SmartAppCustomKeywordReference
 import ru.sber.smartapp.dsl.reference.SmartAppFieldReference
 import ru.sber.smartapp.dsl.reference.SmartAppReference
 import java.io.File
@@ -152,7 +155,8 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
             val expected = check.getAsJsonArray("targets")
                 .map { expectedDescribed(fixture, it.asJsonObject) }
                 .sortedWith(compareBy({ it.file }, { it.line }, { it.column ?: 0 }, { it.rangeText }))
-            val declaration = if (includeDeclaration) listOf(describe(fixture, definition)) else emptyList()
+            val declaration =
+                if (includeDeclaration) declarationsOf(fixture, definition) else emptyList()
             val actual = (usages + declaration)
                 .sortedWith(compareBy({ it.file }, { it.line }, { it.column ?: 0 }, { it.rangeText }))
                 .mapIndexed { index, described ->
@@ -542,7 +546,9 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
         val element = usage.element ?: return false
         val range = usage.rangeInElement
         return element.references.any { reference ->
-            val ours = reference is SmartAppReference || reference is SmartAppFieldReference
+            val ours = reference is SmartAppReference ||
+                reference is SmartAppFieldReference ||
+                reference is SmartAppCustomKeywordReference
             ours && (range == null || reference.rangeInElement == range)
         }
     }
@@ -576,6 +582,18 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
             column = columnOf(text, start),
             rangeText = text.substring(start, end),
         )
+    }
+
+    /**
+     * Объявления цели под кареткой. У определения DSL это оно само, а у слова,
+     * зарегистрированного приложением, — строки регистрации в Python: то же
+     * самое отдаёт при `includeDeclaration` ядро расширения, и корпус обязан
+     * видеть с обеих сторон один список.
+     */
+    private fun declarationsOf(fixture: Fixture, definition: JsonProperty): List<Described> {
+        val registrations = SmartAppCustomKeywordTargets.of(definition)?.declarations
+        if (registrations != null) return registrations.map { describe(fixture, it) }
+        return listOf(describe(fixture, definition))
     }
 
     private fun currentText(fixture: Fixture, path: String): String =
@@ -627,9 +645,12 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
 
     /** Область поиска, ограниченная каталогом `references` фикстуры. */
     private fun scopeOf(fixture: Fixture): com.intellij.psi.search.GlobalSearchScope {
-        val anyPath = fixture.files.keys.first()
-        val virtualFile = myFixture.findFileInTempDir("${fixture.name}/$anyPath")
-            ?: error("файл фикстуры '${fixture.name}' не найден в тестовом проекте")
+        // Именно DSL-файл: в фикстуре бывают и Python-файлы приложения, а у них
+        // набора `references` нет — scope молча расширился бы до всего проекта.
+        val virtualFile = fixture.files.keys
+            .mapNotNull { myFixture.findFileInTempDir("${fixture.name}/$it") }
+            .firstOrNull { SmartAppFiles.isDslFile(it) }
+            ?: error("в фикстуре '${fixture.name}' нет DSL-файла для scope")
         return SmartAppScopes.forFile(project, virtualFile)
     }
 
