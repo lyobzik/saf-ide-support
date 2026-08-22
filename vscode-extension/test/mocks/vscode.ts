@@ -299,6 +299,9 @@ export const workspaceControl = {
 Object.assign(workspace, {
   async findFiles(_glob: string, _exclude?: string): Promise<Uri[]> {
     await workspaceControl.findFilesGate;
+    // Список снимается ДО шлюза: настоящий findFiles тоже отдаёт снимок, а тест
+    // на гонку обязан уметь поменять состав файлов уже после перечисления.
+    const listed = [...workspaceControl.files.keys()];
     if (_glob.includes(".py")) {
       workspaceControl.pythonFindFilesCalls++;
       await workspaceControl.pythonFindFilesGate;
@@ -309,7 +312,7 @@ Object.assign(workspace, {
       workspaceControl.findFilesFailures--;
       throw new Error("findFiles failed");
     }
-    return [...workspaceControl.files.keys()].map((uri) => Uri.parse(uri));
+    return listed.map((uri) => Uri.parse(uri));
   },
 
   createFileSystemWatcher(_glob: string): FileSystemWatcher {

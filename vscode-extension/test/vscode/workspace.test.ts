@@ -408,8 +408,18 @@ describe("жизненный цикл ресурсов приложения", ()
     // Набор исчезает во время сканирования.
     workspaceControl.files.delete(appDsl);
     workspaceControl.watchers[0]!.deleted.fire(Uri.parse(appDsl));
-    // Python меняется, пока приложения нет.
-    workspaceControl.files.set(appResources, resourcesText("after_change"));
+
+    // Пока приложения нет, ресурсы переезжают в другой модуль: идущее
+    // сканирование о нём не знает — список файлов оно сняло раньше. Значит
+    // словарь может собрать только повторный скан.
+    const movedResources = `${appRoot}/app/resources/custom_v2.py`;
+    workspaceControl.files.delete(appResources);
+    workspaceControl.files.set(movedResources, resourcesText("after_change"));
+    workspaceControl.files.set(
+      appConfig,
+      "from app.resources.custom_v2 import R\nRESOURCES = R\n",
+    );
+
     // Набор возвращается — тоже до конца сканирования.
     workspaceControl.files.set(appDsl, '{ "some_action": { "type": "after_change" } }');
     workspaceControl.watchers[0]!.created.fire(Uri.parse(appDsl));
