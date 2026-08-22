@@ -16,7 +16,7 @@ import keywordsJson from "../../../shared/keywords/keywords.json";
  */
 
 /** Версия контракта, с которой умеет работать расширение. */
-export const EXPECTED_CONTRACT_VERSION = 4;
+export const EXPECTED_CONTRACT_VERSION = 5;
 
 /** Имя вида сущности, как оно записано в контракте. */
 export type RefKind = string;
@@ -46,6 +46,26 @@ export interface FileRefRule {
   readonly ownerTypes: readonly string[] | null;
   /** Каталоги набора `references`, просматриваются по порядку. */
   readonly searchDirs: readonly string[];
+}
+
+/**
+ * Правила чтения ресурсов приложения: словарь ключевых слов — свойство навыка,
+ * а не фреймворка. Активный класс ресурсов назначает `app_config.py`.
+ */
+export interface ResourceScanSpec {
+  /** Файл в корне приложения, назначающий активный класс ресурсов. */
+  readonly configFile: string;
+  /** Переменная в [configFile], хранящая активный класс. */
+  readonly resourcesVariable: string;
+  /** Префикс методов класса ресурсов, в которых происходит регистрация. */
+  readonly methodPrefix: string;
+  readonly fileExtension: string;
+  /** `a.b.c` разрешается в `a/b/c.py`, иначе в `a/b/c/<packageInitFile>`. */
+  readonly packageInitFile: string;
+  /** Предел длины цепочки наследования — страховка от циклического импорта. */
+  readonly maxBaseDepth: number;
+  /** Сегменты пути, внутрь которых сканер не заходит. */
+  readonly excludedDirs: ReadonlySet<string>;
 }
 
 export interface PathSpec {
@@ -143,6 +163,18 @@ export const structuralKeys: ReadonlySet<string> = new Set(rulesJson.structuralK
 export const fieldAccess: FieldAccessSpec = rulesJson.fieldAccess;
 
 export const jinja: JinjaSpec = rulesJson.jinja;
+
+/** Реестр фреймворка -> категория ключевых слов, которую он наполняет. */
+export const keywordRegistries: ReadonlyMap<string, string> = new Map(
+  Object.entries(rulesJson.keywordRegistries),
+);
+if (keywordRegistries.size === 0) fail("keyword registry table is empty");
+
+export const resourceScan: ResourceScanSpec = {
+  ...rulesJson.resourceScan,
+  excludedDirs: new Set(rulesJson.resourceScan.excludedDirs),
+};
+if (resourceScan.configFile.length === 0) fail("resource scan config file is empty");
 
 /** Ключевые слова по категориям (значения свойства `type`). */
 export const keywordsByCategory: ReadonlyMap<string, ReadonlySet<string>> = new Map(

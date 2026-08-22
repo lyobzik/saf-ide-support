@@ -61,6 +61,8 @@ object ExportRules {
         root.add("structuralKeys", strings(SmartAppSpecs.structuralKeys))
         root.add("fieldAccess", fieldAccess())
         root.add("jinja", jinja())
+        root.add("keywordRegistries", stringMap(SmartAppSpecs.keywordRegistries))
+        root.add("resourceScan", resourceScan())
         return GSON.toJson(root) + "\n"
     }
 
@@ -135,6 +137,16 @@ object ExportRules {
                 }
             },
         )
+    }
+
+    private fun resourceScan(): JsonObject = JsonObject().apply {
+        addProperty("configFile", ResourceScanSpec.configFile)
+        addProperty("resourcesVariable", ResourceScanSpec.resourcesVariable)
+        addProperty("methodPrefix", ResourceScanSpec.methodPrefix)
+        addProperty("fileExtension", ResourceScanSpec.fileExtension)
+        addProperty("packageInitFile", ResourceScanSpec.packageInitFile)
+        addProperty("maxBaseDepth", ResourceScanSpec.maxBaseDepth)
+        add("excludedDirs", strings(ResourceScanSpec.excludedDirs))
     }
 
     private fun stringMap(values: Map<String, String>): JsonObject = JsonObject().apply {

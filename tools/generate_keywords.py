@@ -21,20 +21,35 @@ import json
 import os
 import sys
 
-# Сопоставляет имя словаря-реестра (без префикса модуля) -> категорию плагина.
-DICT_TO_CATEGORY = {
-    "actions": "action",
-    "requirements": "requirement",
-    "field_filler_description": "filler",
-    "field_requirements": "field_requirement",
-    "scenarios": "scenario",
-    "form_descriptions": "form_description",
-    "field_descriptions": "field_description",
-    "classifiers": "classifier",
-    "operators": "operator",
-    "comparators": "comparator",
-    "answer_items": "sdk_item",
-}
+# Таблица «реестр -> категория» живёт в контракте (Kotlin-таблицы -> rules.json)
+# и читается отсюда: рантайму плагина и ядру расширения она нужна не меньше, чем
+# генератору, а второй копии в проекте быть не должно. Порядок обязателен:
+# сначала `exportRules`, потом этот скрипт.
+RULES_SNAPSHOT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "shared", "rules", "rules.json"
+)
+
+
+def load_registries(path=RULES_SNAPSHOT):
+    """Читает `keywordRegistries` из снимка контракта, падая при его отсутствии.
+
+    Тихо сгенерировать словарь по пустой таблице нельзя: получился бы пустой
+    keywords.json, а с ним — молча отключённая подсветка.
+    """
+    if not os.path.isfile(path):
+        raise SystemExit(
+            "contract snapshot is missing: %s\n"
+            "run './gradlew :idea-plugin:exportRules' first" % path
+        )
+    with open(path, encoding="utf-8") as handle:
+        snapshot = json.load(handle)
+    registries = snapshot.get("keywordRegistries")
+    if not registries:
+        raise SystemExit(
+            "contract snapshot has no 'keywordRegistries': %s\n"
+            "run './gradlew :idea-plugin:exportRules' first" % path
+        )
+    return registries
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_SRC = os.path.join(HERE, "vendor", "resources__init__.py")
@@ -77,9 +92,10 @@ def _collect_from_dict_literal(dict_node):
             yield key.value
 
 
-def collect_keywords(source):
+def collect_keywords(source, registries=None):
+    registries = registries if registries is not None else load_registries()
     tree = ast.parse(source)
-    result = {cat: set() for cat in DICT_TO_CATEGORY.values()}
+    result = {cat: set() for cat in registries.values()}
 
     for node in ast.walk(tree):
         if not (isinstance(node, ast.FunctionDef) and node.name.startswith("init_")):
@@ -91,7 +107,7 @@ def collect_keywords(source):
                     if not isinstance(tgt, ast.Subscript):
                         continue
                     base = _subscript_base_name(tgt)
-                    cat = DICT_TO_CATEGORY.get(base)
+                    cat = registries.get(base)
                     if cat is None:
                         continue
                     kw = _const_str(tgt.slice)
@@ -102,7 +118,7 @@ def collect_keywords(source):
                 func = stmt.func
                 if isinstance(func, ast.Attribute) and func.attr == "update":
                     base = _subscript_base_name_from_attr(func.value)
-                    cat = DICT_TO_CATEGORY.get(base)
+                    cat = registries.get(base)
                     if cat is None:
                         continue
                     for arg in stmt.args:

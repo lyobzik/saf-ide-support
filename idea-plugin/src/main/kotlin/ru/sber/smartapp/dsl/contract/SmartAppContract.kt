@@ -27,7 +27,7 @@ object SmartAppContract {
      * (там версия описана как `const`) и `EXPECTED_CONTRACT_VERSION` в
      * TS-расширении — иначе проверки падают.
      */
-    const val VERSION: Int = 4
+    const val VERSION: Int = 5
 }
 
 /** Вид сущности и подкаталог `static/references/<dirName>/`, в котором он живёт. */
@@ -91,6 +91,55 @@ object JinjaSpec {
 }
 
 /** Данные для определения категории ключевых слов по контексту свойства `type`. */
+/**
+ * Правила чтения ресурсов приложения: словарь ключевых слов — свойство не
+ * фреймворка, а конкретного навыка. Приложение наследует `SmartAppResources`,
+ * дописывает пары «имя из JSON → Python-класс» в методах `init_*`, а активный
+ * класс назначает `app_config.py`.
+ *
+ * Происхождение правила: публичных исходников `smart_kit` в окружении нет,
+ * но docstring класса ресурсов в эталонном приложении говорит прямо —
+ * «Для использования данных ресурсов присвойте переменной RESOURCES в
+ * app_config этот класс как значение».
+ *
+ * Здесь только имена и раскладка (данные). Разбор Python — алгоритм, он живёт
+ * в коде обеих реализаций.
+ */
+object ResourceScanSpec {
+
+    /** Файл в корне приложения, назначающий активный класс ресурсов. */
+    const val configFile: String = "app_config.py"
+
+    /** Переменная в [configFile], хранящая активный класс. */
+    const val resourcesVariable: String = "RESOURCES"
+
+    /** Префикс методов класса ресурсов, в которых происходит регистрация. */
+    const val methodPrefix: String = "init_"
+
+    const val fileExtension: String = ".py"
+
+    /** Файл пакета: `a.b.c` разрешается в `a/b/c.py`, иначе в `a/b/c/__init__.py`. */
+    const val packageInitFile: String = "__init__.py"
+
+    /** Предел длины цепочки наследования — страховка от циклического импорта. */
+    const val maxBaseDepth: Int = 8
+
+    /**
+     * Сегменты пути, внутрь которых сканер не заходит ни при обходе, ни при
+     * разрешении импортов. Виртуальное окружение внутри проекта — не код
+     * приложения, а его зависимости.
+     */
+    val excludedDirs: Set<String> = linkedSetOf(
+        "venv",
+        ".venv",
+        "site-packages",
+        "__pycache__",
+        "node_modules",
+        "build",
+        "dist",
+    )
+}
+
 object TypeContextSpec {
 
     /**
@@ -227,6 +276,29 @@ object SmartAppSpecs {
             ownerTypes = setOf("unified_template"),
             searchDirs = listOf("templates"),
         ),
+    )
+
+    /**
+     * Реестры фреймворка и категории ключевых слов, которые они наполняют.
+     *
+     * Одна таблица на три потребителя: генератор словаря
+     * (`tools/generate_keywords.py` читает её из снимка `rules.json`), рантайм
+     * плагина и ядро расширения — они по ней узнают, какая категория у
+     * регистрации в ресурсах приложения. Раньше таблица жила только в
+     * генераторе, и рантайму её взять было неоткуда.
+     */
+    val keywordRegistries: Map<String, String> = linkedMapOf(
+        "actions" to "action",
+        "requirements" to "requirement",
+        "field_filler_description" to "filler",
+        "field_requirements" to "field_requirement",
+        "scenarios" to "scenario",
+        "form_descriptions" to "form_description",
+        "field_descriptions" to "field_description",
+        "classifiers" to "classifier",
+        "operators" to "operator",
+        "comparators" to "comparator",
+        "answer_items" to "sdk_item",
     )
 
     /** Структурные ключи DSL, подсвечиваемые как поля. */

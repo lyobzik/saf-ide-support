@@ -14,7 +14,9 @@
     "typeContext",
     "structuralKeys",
     "fieldAccess",
-    "jinja"
+    "jinja",
+    "keywordRegistries",
+    "resourceScan"
   ],
   "definitions": {
     "kindName": {
@@ -52,7 +54,7 @@
           "const": true
         },
         "contractVersion": {
-          "const": 4
+          "const": 5
         },
         "note": {
           "type": "string",
@@ -274,6 +276,63 @@
         "formVariable": {
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "keywordRegistries": {
+      "type": "object",
+      "description": "Реестр фреймворка -> категория ключевых слов, которую он наполняет.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "resourceScan": {
+      "type": "object",
+      "description": "Правила чтения ресурсов приложения (custom app resources).",
+      "required": [
+        "configFile",
+        "resourcesVariable",
+        "methodPrefix",
+        "fileExtension",
+        "packageInitFile",
+        "maxBaseDepth",
+        "excludedDirs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "configFile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resourcesVariable": {
+          "type": "string",
+          "minLength": 1
+        },
+        "methodPrefix": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fileExtension": {
+          "type": "string",
+          "minLength": 1
+        },
+        "packageInitFile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxBaseDepth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "excludedDirs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     }
