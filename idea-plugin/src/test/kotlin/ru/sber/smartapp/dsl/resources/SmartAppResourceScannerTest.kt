@@ -220,4 +220,84 @@ class SmartAppResourceScannerTest {
         /** Обратный слэш строкой: в исходниках тестов он иначе съедается разбором. */
         const val BACKSLASH = "\\"
     }
+
+    @Test
+    fun inlineSuiteIsRejected() {
+        val source = "class R(Base):\n    def init_actions(self):\n" +
+            """        if enabled: actions["wrong"] = C""" + "\n" +
+            """        actions["direct"] = C""" + "\n"
+        assertEquals(listOf("direct"), registrations(source).map { it.name })
+    }
+
+    @Test
+    fun inlineSuperInConditionIsNotCounted() {
+        val source = "class R(Base):\n    def init_actions(self):\n" +
+            "        if enabled: super().init_actions()\n"
+        assertEquals(
+            false,
+            SmartAppResourceScanner.parseModule(source).classes.single().methods.single().callsSuper,
+        )
+    }
+
+    @Test
+    fun inlineTopLevelConditionMarksVariable() {
+        val module = SmartAppResourceScanner.parseModule(
+            "RESOURCES = ProdResources\nif dev: RESOURCES = DevResources\n",
+        )
+        assertEquals(true, "RESOURCES" in module.conditionalVars)
+    }
+
+    @Test
+    fun superRequiresIdentifierBoundary() {
+        for (call in listOf("my_super().init_actions()", "obj.super().init_actions()")) {
+            val source = "class R(Base):\n    def init_actions(self):\n        $call\n"
+            assertEquals(
+                call,
+                false,
+                SmartAppResourceScanner.parseModule(source).classes.single().methods.single().callsSuper,
+            )
+        }
+        val real = "class R(Base):\n    def init_actions(self):\n        super().init_actions()\n"
+        assertEquals(
+            true,
+            SmartAppResourceScanner.parseModule(real).classes.single().methods.single().callsSuper,
+        )
+    }
+
+    @Test
+    fun importsWithCommentAndExtraSpacesAreParsed() {
+        for (line in listOf(
+            "from app.resources import R  # комментарий",
+            "from app.resources    import R",
+        )) {
+            val module = SmartAppResourceScanner.parseModule("$line\nRESOURCES = R\n")
+            assertEquals(
+                line,
+                SmartAppResourceScanner.ImportedName("app.resources", "R"),
+                module.imports["R"],
+            )
+        }
+    }
+
+    @Test
+    fun nestedClassInsideMethodIsNotResourceClass() {
+        val source = "class R(Base):\n    def init_actions(self):\n" +
+            "        class Nested:\n" +
+            "            def init_actions(self):\n" +
+            """                actions["wrong"] = C""" + "\n"
+        assertEquals(emptyList<Any>(), registrations(source))
+        assertEquals(listOf("R"), SmartAppResourceScanner.parseModule(source).classes.map { it.name })
+    }
+
+    @Test
+    fun octalEscapeIsRejectedWhileNulIsSupported() {
+        assertEquals(
+            emptyList<Any>(),
+            registrations(inMethod("""actions["a@BS012b"] = C""".replace("@BS", BACKSLASH))),
+        )
+        assertEquals(
+            "a" + '\u0000' + "b",
+            registrations(inMethod("""actions["a@BS0b"] = C""".replace("@BS", BACKSLASH))).single().name,
+        )
+    }
 }

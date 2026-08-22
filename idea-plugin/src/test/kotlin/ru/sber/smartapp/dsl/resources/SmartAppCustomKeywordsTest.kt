@@ -23,7 +23,10 @@ class SmartAppCustomKeywordsTest : BasePlatformTestCase() {
         )
         myFixture.addFileToProject(
             "${prefix}app/resources/custom_app_resources.py",
-            "class CustomAppResources(SmartAppResources):\n" +
+            // Импорт базы обязателен: без него база «ниоткуда», и цепочка по
+            // контракту не подтверждается.
+            "from smart_kit.resources import SmartAppResources\n\n" +
+                "class CustomAppResources(SmartAppResources):\n" +
                 "    def init_actions(self):\n" +
                 "        super().init_actions()\n" +
                 "        actions[\"$action\"] = $className\n",
@@ -47,7 +50,8 @@ class SmartAppCustomKeywordsTest : BasePlatformTestCase() {
         app("", "used")
         myFixture.addFileToProject(
             "app/resources/unused_resources.py",
-            "class UnusedResources(SmartAppResources):\n" +
+            "from smart_kit.resources import SmartAppResources\n\n" +
+                "class UnusedResources(SmartAppResources):\n" +
                 "    def init_actions(self):\n        actions[\"unused\"] = C\n",
         )
         assertEquals(listOf("used"), keywordsOf("static/references/actions/a.json").map { it.name })

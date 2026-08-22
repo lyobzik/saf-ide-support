@@ -192,6 +192,13 @@ object SmartAppResourceScanner {
     private val IMPORT_RE = Regex("^\\s*import\\s+($DOTTED)(?:\\s+as\\s+($IDENT))?\\s*$")
     private val ASSIGN_DOTTED_RE = Regex("^\\s*($IDENT)\\s*=\\s*($DOTTED)\\s*$")
     private val ASSIGN_ANY_RE = Regex("^\\s*($IDENT)\\s*=[^=]")
+
+    /** Заголовок управляющей конструкции: тело может быть и на этой же строке. */
+    private val CONTROL_RE =
+        Regex("^\\s*(?:if|elif|else|for|while|try|except|finally|with|async\\s+(?:for|with))\\b")
+
+    /** Присваивание где-то внутри строки — для однострочных `if dev: X = Y`. */
+    private val INLINE_ASSIGN_RE = Regex("(?:^|[^A-Za-z0-9_.])($IDENT)\\s*=[^=]")
     private val SUBSCRIPT_RE = Regex("(?:^|[^A-Za-z0-9_.])((?:$IDENT\\.)*)($IDENT)\\s*\\[")
     private val UPDATE_RE = Regex("(?:^|[^A-Za-z0-9_.])((?:$IDENT\\.)*)($IDENT)\\s*\\.update\\s*\\(")
     private val DOTTED_ONLY_RE = Regex("^$DOTTED$")
@@ -241,7 +248,9 @@ object SmartAppResourceScanner {
                     name = classMatch.groupValues[1],
                     bases = positionalBases(rawLine, classMatch.groupValues[2]),
                 )
-                classes.add(cls)
+                // Модель отдаёт только классы модульного уровня: вложенный класс
+                // не может быть ресурсным, а одноимённый увёл бы резолвер не туда.
+                if (stack.isEmpty()) classes.add(cls)
                 stack.add(Block(line.indent, isClass = true, cls = cls, method = null))
                 continue
             }
@@ -256,15 +265,28 @@ object SmartAppResourceScanner {
             }
 
             val enclosing = stack.lastOrNull()
-            val method = if (enclosing != null && !enclosing.isClass) enclosing.method else null
+            // Отступ тела фиксирует первая строка внутри блока — какой бы она ни
+            // была, иначе управляющий заголовок сместил бы границу тела.
             if (enclosing != null && enclosing.bodyIndent == null) enclosing.bodyIndent = line.indent
+
+            // Однострочный suite (`if enabled: actions["x"] = C`) стоит на отступе
+            // тела, но регистрация в нём условна так же, как в многострочном.
+            if (CONTROL_RE.containsMatchIn(maskedLine)) {
+                for (match in INLINE_ASSIGN_RE.findAll(maskedLine)) {
+                    conditionalVars.add(match.groupValues[1])
+                }
+                continue
+            }
+
+            val method = if (enclosing != null && !enclosing.isClass) enclosing.method else null
             // Только прямые операторы тела метода. Строка глубже — это `if`,
             // `for`, `try`, `with` или вложенный `def`: регистрация там условная,
             // и принять её значило бы обещать слово, которого может не быть.
             val directBodyLine = enclosing != null && enclosing.bodyIndent == line.indent
             val insideResourceMethod = method != null && directBodyLine &&
                 method.name.startsWith(ResourceScanSpec.methodPrefix) &&
-                stack.size >= 2 && stack[stack.size - 2].isClass
+                // Ровно «класс -> метод»: вложенный класс внутри init_* не ресурсный.
+                stack.size == 2 && stack[0].isClass
 
             if (insideResourceMethod && method != null) {
                 if (superCallRe(method.name).containsMatchIn(maskedLine)) method.callsSuper = true
@@ -274,8 +296,9 @@ object SmartAppResourceScanner {
 
             val fromImport = FROM_IMPORT_RE.find(maskedLine)
             if (fromImport != null) {
-                val marker = rawLine.indexOf(" import ")
-                val items = if (marker >= 0) rawLine.substring(marker + " import ".length) else ""
+                // Список имён берётся из маскированной строки: там комментарий уже
+                // стёрт, а имена — идентификаторы, маскирование их не меняет.
+                val items = fromImport.groupValues[2]
                 for (item in items.replace("(", "").replace(")", "").split(',')) {
                     val parts = item.trim().split(Regex("\\s+as\\s+"))
                     val name = parts.firstOrNull()?.trim().orEmpty()
@@ -335,8 +358,13 @@ object SmartAppResourceScanner {
             .filter { it.isNotEmpty() && !it.contains('=') && !it.startsWith("*") }
     }
 
+    /**
+     * Вызов именно `super()`, а не `my_super()` или `obj.super()`: слева от имени
+     * обязана быть граница — начало строки или символ, не входящий в идентификатор
+     * и не точка.
+     */
     private fun superCallRe(method: String): Regex =
-        Regex("super\\s*\\([^)]*\\)\\s*\\.\\s*$method\\s*\\(")
+        Regex("(?:^|[^A-Za-z0-9_.])super\\s*\\([^)]*\\)\\s*\\.\\s*$method\\s*\\(")
 
     /** Индекс закрывающей скобки для скобки в [open], либо -1. */
     private fun matchBracket(masked: String, open: Int): Int {
@@ -397,7 +425,12 @@ object SmartAppResourceScanner {
                 'n' -> out.append('\n')
                 't' -> out.append('\t')
                 'r' -> out.append('\r')
-                '0' -> out.append('\u0000')
+                '0' -> {
+                    // `\0` — NUL, но `\012` — восьмеричная последовательность, а она
+                    // вне контракта: принять её частично значило бы получить не то имя.
+                    if (content.getOrNull(i) in '0'..'7') return null
+                    out.append('\u0000')
+                }
                 '\\' -> out.append('\\')
                 '\'' -> out.append('\'')
                 '"' -> out.append('"')

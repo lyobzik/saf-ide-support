@@ -161,7 +161,10 @@ describe("жизненный цикл ресурсов приложения", ()
   const appDsl = `${appRoot}/static/references/actions/actions.json`;
   const appConfig = `${appRoot}/app_config.py`;
   const appResources = `${appRoot}/app/resources/custom.py`;
+  // Импорт базы обязателен: без него база «ниоткуда», и цепочка по контракту
+  // не подтверждается.
   const resourcesText = (action: string): string =>
+    "from smart_kit.resources import SmartAppResources\n\n" +
     `class R(SmartAppResources):\n    def init_actions(self):\n        actions["${action}"] = C\n`;
 
   it("новое приложение сканируется после активации", async () => {
@@ -183,6 +186,42 @@ describe("жизненный цикл ресурсов приложения", ()
     expect(
       workspace.index.customKeywordsOf("w/app_b/static/references").map((k) => k.name),
     ).toEqual(["late_action"]);
+    workspace.dispose();
+  });
+
+  it("готовность не наступает раньше конца сканирования Python", async () => {
+    // Досканирование, начатое при индексации DSL-файла, обязано завершиться до
+    // markReady(): иначе индекс «готов», а словарь приложения пуст.
+    workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
+    workspaceControl.files.set(appResources, resourcesText("ready_action"));
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "ready_action" } }');
+
+    const workspace = new SmartAppWorkspace();
+    await workspace.start();
+
+    expect(workspace.index.isReady()).toBe(true);
+    expect(
+      workspace.index.customKeywordsOf("w/app_b/static/references").map((k) => k.name),
+    ).toEqual(["ready_action"]);
+    workspace.dispose();
+  });
+
+  it("во время сканирования словарь не отдаётся", async () => {
+    workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
+    workspaceControl.files.set(appResources, resourcesText("scanned_action"));
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "scanned_action" } }');
+
+    const workspace = new SmartAppWorkspace();
+    await workspace.start();
+    const names = () =>
+      workspace.index.customKeywordsOf("w/app_b/static/references").map((k) => k.name);
+    expect(names()).toEqual(["scanned_action"]);
+
+    // Пока идёт сканирование, словарь заведомо неполон — отдаём пустой.
+    workspace.index.beginPythonScan();
+    expect(names()).toEqual([]);
+    workspace.index.endPythonScan();
+    expect(names()).toEqual(["scanned_action"]);
     workspace.dispose();
   });
 

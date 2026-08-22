@@ -121,7 +121,13 @@ function resolveChain(start: ClassRef, read: ModuleReader): ChainEntry[] | undef
     chain.push({ cls, file: current.file });
     if (cls.bases.length > 1) return undefined;
     const base: string | undefined = cls.bases[0];
-    current = base === undefined ? undefined : classRefOf(base, module, current.file);
+    if (base === undefined) break; // класс без базы — цепочка закончилась
+    // База, которую не удалось даже сопоставить с модулем (нет импорта, нет
+    // класса рядом), — это не библиотечная база, а неизвестность: подтвердить
+    // цепочку нечем.
+    const next = classRefOf(base, module, current.file);
+    if (next === undefined) return undefined;
+    current = next;
   }
   return finish(chain);
 }

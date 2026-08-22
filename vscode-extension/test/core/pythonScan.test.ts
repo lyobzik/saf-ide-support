@@ -201,3 +201,63 @@ describe("escape-последовательности", () => {
     expect(found.map((r) => r.name)).toEqual(['a\\"b']);
   });
 });
+
+describe("однострочные конструкции и границы", () => {
+  it("однострочный suite не даёт регистрации", () => {
+    const source =
+      "class R(Base):\n    def init_actions(self):\n" +
+      '        if enabled: actions["wrong"] = C\n' +
+      '        actions["direct"] = C\n';
+    expect(registrationsOf(source).map((r) => r.name)).toEqual(["direct"]);
+  });
+
+  it("однострочный super() в условии не считается вызовом", () => {
+    const source =
+      "class R(Base):\n    def init_actions(self):\n        if enabled: super().init_actions()\n";
+    expect(parseModule(source).classes[0]?.methods[0]?.callsSuper).toBe(false);
+  });
+
+  it("однострочный if на верхнем уровне помечает переменную условной", () => {
+    const module = parseModule("RESOURCES = ProdResources\nif dev: RESOURCES = DevResources\n");
+    expect(module.conditionalVars.has("RESOURCES")).toBe(true);
+  });
+
+  it.each([
+    ["my_super().init_actions()"],
+    ["obj.super().init_actions()"],
+  ])("%s не считается вызовом super()", (call) => {
+    const source = `class R(Base):\n    def init_actions(self):\n        ${call}\n`;
+    expect(parseModule(source).classes[0]?.methods[0]?.callsSuper).toBe(false);
+  });
+
+  it("настоящий super() распознаётся", () => {
+    const source =
+      "class R(Base):\n    def init_actions(self):\n        super().init_actions()\n";
+    expect(parseModule(source).classes[0]?.methods[0]?.callsSuper).toBe(true);
+  });
+
+  it.each([
+    ["from app.resources import R  # комментарий"],
+    ["from app.resources    import R"],
+  ])("импорт разбирается: %s", (line) => {
+    const module = parseModule(`${line}\nRESOURCES = R\n`);
+    expect(module.imports.get("R")).toEqual({ module: "app.resources", name: "R" });
+  });
+
+  it("вложенный класс внутри init_* ресурсным не считается", () => {
+    const source =
+      "class R(Base):\n    def init_actions(self):\n" +
+      "        class Nested:\n" +
+      "            def init_actions(self):\n" +
+      '                actions["wrong"] = C\n';
+    expect(registrationsOf(source)).toEqual([]);
+    // Вложенный класс не попадает и в модель модуля.
+    expect(parseModule(source).classes.map((c) => c.name)).toEqual(["R"]);
+  });
+
+  it("восьмеричный escape отвергается целиком", () => {
+    expect(registrationsOf(inMethod('actions["a\\012b"] = C'))).toEqual([]);
+    // Одиночный \\0 — это NUL, он поддержан.
+    expect(registrationsOf(inMethod('actions["a\\0b"] = C'))[0]?.name).toBe("a\0b");
+  });
+});

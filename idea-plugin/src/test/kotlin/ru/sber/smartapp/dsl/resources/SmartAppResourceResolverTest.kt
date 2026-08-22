@@ -16,8 +16,12 @@ class SmartAppResourceResolverTest {
     private fun keywords(files: Map<String, String>) =
         SmartAppResourceResolver.customKeywords(reader(files))
 
+    /**
+     * Класс ресурсов вместе с импортом базы: без импорта база «ниоткуда», и по
+     * контракту такая цепочка не подтверждается.
+     */
     private fun cls(name: String, base: String, body: String): String =
-        "class $name($base):\n$body\n"
+        "from smart_kit.resources import $base\n\nclass $name($base):\n$body\n"
 
     private val config = "from app.resources.custom_app_resources import CustomAppResources\n" +
         "RESOURCES = CustomAppResources\n"
@@ -197,6 +201,22 @@ class SmartAppResourceResolverTest {
         actions["custom"] = C""" + "\n",
                 // Модуль читается, а класса в нём нет — это не библиотечная база.
                 "app/resources/base.py" to "class Other(SmartAppResources):\n    pass\n",
+            ),
+        )
+        assertEquals(emptyList<Any>(), found)
+    }
+
+    @Test
+    fun unknownBaseGivesNothing() {
+        // `class C(MissingBase)` без импорта — это не библиотечная база, а
+        // неизвестность: подтвердить цепочку нечем.
+        val found = keywords(
+            mapOf(
+                "app_config.py" to config,
+                "app/resources/custom_app_resources.py" to
+                    "class CustomAppResources(MissingBase):\n" +
+                    """    def init_actions(self):
+        actions["custom"] = C""" + "\n",
             ),
         )
         assertEquals(emptyList<Any>(), found)

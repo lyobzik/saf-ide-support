@@ -117,6 +117,14 @@ export class SmartAppIndex {
    * соседей тоже становится неверным — кэш сбрасывается целиком.
    */
   private rootsSignature: string | undefined;
+
+  /**
+   * Число идущих сканирований Python. Пока оно не ноль, словарь приложения
+   * заведомо неполон: часть модулей цепочки ещё не прочитана. Отдавать такой
+   * словарь (и тем более кэшировать) нельзя — пользователь увидел бы слова,
+   * которые через секунду поменяются.
+   */
+  private pythonScans = 0;
   private ready = false;
 
   /**
@@ -132,12 +140,23 @@ export class SmartAppIndex {
     this.ready = true;
   }
 
+  /** Отмечает начало сканирования Python: словарь приложения на это время пуст. */
+  beginPythonScan(): void {
+    this.pythonScans++;
+  }
+
+  endPythonScan(): void {
+    this.pythonScans = Math.max(0, this.pythonScans - 1);
+    this.customCache.clear();
+  }
+
   clear(): void {
     this.files.clear();
     this.assets.clear();
     this.pythonTexts.clear();
     this.customCache.clear();
     this.rootsSignature = undefined;
+    this.pythonScans = 0;
     this.ready = false;
   }
 
@@ -179,6 +198,9 @@ export class SmartAppIndex {
    */
   customKeywordsOf(scopeRoot: string | undefined): readonly CustomKeyword[] {
     if (scopeRoot === undefined) return [];
+    // До готовности и во время сканирования словарь неполон: молчим, как и
+    // остальные запросы, зависящие от индекса.
+    if (!this.ready || this.pythonScans > 0) return [];
     // Корни считаются первыми: их изменение сбрасывает кэш, и только после
     // этого можно смотреть в него.
     const roots = this.applicationRoots();

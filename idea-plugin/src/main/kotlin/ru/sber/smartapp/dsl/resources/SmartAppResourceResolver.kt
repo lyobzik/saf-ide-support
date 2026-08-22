@@ -110,8 +110,11 @@ object SmartAppResourceResolver {
 
             chain.add(ChainEntry(cls, ref.file))
             if (cls.bases.size > 1) return null
-            val base = cls.bases.firstOrNull()
-            current = if (base == null) null else classRefOf(base, module, ref.file)
+            val base = cls.bases.firstOrNull() ?: break // класс без базы — конец цепочки
+            // База, которую не удалось даже сопоставить с модулем (нет импорта,
+            // нет класса рядом), — это не библиотечная база, а неизвестность:
+            // подтвердить цепочку нечем.
+            current = classRefOf(base, module, ref.file) ?: return null
         }
         return chain.asReversed().toList() // от базы к производному — в порядке применения
     }

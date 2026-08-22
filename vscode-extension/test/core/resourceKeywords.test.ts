@@ -18,8 +18,12 @@ const CONFIG = [
   "RESOURCES = CustomAppResources",
 ].join("\n");
 
+/**
+ * Класс ресурсов вместе с импортом базы: без импорта база «ниоткуда», и по
+ * контракту такая цепочка не подтверждается (см. тест про неизвестную базу).
+ */
 const cls = (name: string, base: string, body: string): string =>
-  `class ${name}(${base}):\n${body}\n`;
+  `from smart_kit.resources import ${base}\n\nclass ${name}(${base}):\n${body}\n`;
 
 describe("активный класс", () => {
   it("берётся из RESOURCES и находится по импорту", () => {
@@ -222,6 +226,19 @@ describe("обрыв цепочки", () => {
     ).toEqual([]);
   });
 
+  it("база, которой неоткуда взяться, гасит словарь", () => {
+    // `class C(MissingBase)` без импорта — это не библиотечная база, а
+    // неизвестность: подтвердить цепочку нечем.
+    expect(
+      chainOf({
+        "app_config.py": CONFIG,
+        "app/resources/custom_app_resources.py":
+          "class CustomAppResources(MissingBase):\n" +
+          '    def init_actions(self):\n        actions["custom"] = C\n',
+      }),
+    ).toEqual([]);
+  });
+
   it("слишком длинная цепочка", () => {
     const files: Record<string, string> = { "app_config.py": CONFIG };
     files["app/resources/custom_app_resources.py"] =
@@ -297,6 +314,7 @@ describe("индекс приложений", () => {
     `from ${module} import ${cls}\nRESOURCES = ${cls}\n`;
 
   const resources = (name: string, action: string): string =>
+    "from smart_kit.resources import SmartAppResources\n\n" +
     `class ${name}(SmartAppResources):\n    def init_actions(self):\n        actions["${action}"] = C\n`;
 
   const indexWith = (files: Record<string, string>): SmartAppIndex => {
@@ -411,7 +429,8 @@ describe("слова приложения в семантике", () => {
     );
     index.upsert(
       "file:///w/app/app/resources/custom.py",
-      'class R(SmartAppResources):\n    def init_actions(self):\n        actions["custom_action"] = CustomAction\n',
+      "from smart_kit.resources import SmartAppResources\n\n" +
+        'class R(SmartAppResources):\n    def init_actions(self):\n        actions["custom_action"] = CustomAction\n',
     );
     index.upsert(uri, json);
     index.markReady();

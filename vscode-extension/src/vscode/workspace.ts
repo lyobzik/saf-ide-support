@@ -37,6 +37,14 @@ export class SmartAppWorkspace implements vscode.Disposable {
    */
   private readonly scannedRoots = new Set<string>();
 
+  /**
+   * Идущие сканирования Python. `start()` обязан дождаться и тех, что запустил
+   * не он сам: досканирование, начатое при индексации DSL-файла, иначе
+   * продолжалось бы уже после `markReady()`, и словарь приложения оказался бы
+   * пуст при «готовом» индексе.
+   */
+  private readonly pendingScans = new Set<Promise<void>>();
+
   /** Срабатывает после изменения индекса — подписчики пересчитывают диагностику. */
   readonly onDidUpdate = this.onIndexed.event;
 
@@ -83,6 +91,7 @@ export class SmartAppWorkspace implements vscode.Disposable {
     // Python сканируется после DSL: корни приложений известны только по
     // найденным наборам static/references.
     await this.scanPython();
+    while (this.pendingScans.size > 0) await Promise.all([...this.pendingScans]);
 
     // Уже открытые документы могли измениться до активации расширения: их
     // содержимое в редакторе новее того, что лежит на диске.
@@ -139,9 +148,20 @@ export class SmartAppWorkspace implements vscode.Disposable {
     if (fresh.length === 0) return;
     for (const root of fresh) this.scannedRoots.add(root);
 
-    const files = await vscode.workspace.findFiles(PYTHON_GLOB, PYTHON_EXCLUDE);
-    await Promise.all(files.map((uri) => this.reloadPython(uri)));
+    this.index.beginPythonScan();
+    try {
+      const files = await vscode.workspace.findFiles(PYTHON_GLOB, PYTHON_EXCLUDE);
+      await Promise.all(files.map((uri) => this.reloadPython(uri)));
+    } finally {
+      this.index.endPythonScan();
+    }
     if (notify) this.onIndexed.fire();
+  }
+
+  /** Запоминает идущее сканирование, чтобы `start()` мог его дождаться. */
+  private track(scan: Promise<void>): void {
+    this.pendingScans.add(scan);
+    void scan.finally(() => this.pendingScans.delete(scan));
   }
 
   /** Возвращает файл к содержимому диска после закрытия несохранённого документа. */
@@ -230,7 +250,7 @@ export class SmartAppWorkspace implements vscode.Disposable {
     this.nextGeneration(uri);
     this.texts.set(uri, text);
     this.index.upsert(uri, text);
-    if (isDslFile(uri)) void this.scanPython(notify);
+    if (isDslFile(uri)) this.track(this.scanPython(notify));
     if (notify) this.onIndexed.fire();
   }
 }

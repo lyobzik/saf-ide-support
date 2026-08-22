@@ -195,6 +195,11 @@ const FROM_IMPORT_RE = new RegExp(`^\\s*from\\s+(${DOTTED})\\s+import\\s+(.+?)\\
 const IMPORT_RE = new RegExp(`^\\s*import\\s+(${DOTTED})(?:\\s+as\\s+(${IDENT}))?\\s*$`);
 const ASSIGN_DOTTED_RE = new RegExp(`^\\s*(${IDENT})\\s*=\\s*(${DOTTED})\\s*$`);
 const ASSIGN_ANY_RE = new RegExp(`^\\s*(${IDENT})\\s*=[^=]`);
+/** Заголовок управляющей конструкции: тело может быть и на этой же строке. */
+const CONTROL_RE =
+  /^\s*(?:if|elif|else|for|while|try|except|finally|with|async\s+(?:for|with))\b/;
+/** Присваивание где-то внутри строки — для однострочных `if dev: X = Y`. */
+const INLINE_ASSIGN_RE = new RegExp(`(?:^|[^A-Za-z0-9_.])(${IDENT})\\s*=[^=]`, "g");
 
 interface ClassDraft {
   name: string;
@@ -237,7 +242,9 @@ export function parseModule(text: string): PyModule {
         bases: positionalBases(rawLine, classMatch),
         methods: [],
       };
-      classes.push(cls);
+      // Модель отдаёт только классы модульного уровня: вложенный класс не может
+      // быть ресурсным, а одноимённый увёл бы резолвер не туда.
+      if (stack.length === 0) classes.push(cls);
       stack.push({ indent: line.indent, kind: "class", cls });
       continue;
     }
@@ -251,11 +258,28 @@ export function parseModule(text: string): PyModule {
       continue;
     }
 
-    const enclosing = stack[stack.length - 1];
-    const method = enclosing?.kind === "def" ? enclosing.method : undefined;
-    if (enclosing !== undefined && enclosing.bodyIndent === undefined) {
-      enclosing.bodyIndent = line.indent;
+    const enclosingBlock = stack[stack.length - 1];
+    // Отступ тела фиксирует первая строка внутри блока — какой бы она ни была,
+    // иначе управляющий заголовок сместил бы границу тела на вложенные строки.
+    if (enclosingBlock !== undefined && enclosingBlock.bodyIndent === undefined) {
+      enclosingBlock.bodyIndent = line.indent;
     }
+
+    // Однострочный suite (`if enabled: actions["x"] = C`) стоит на отступе тела,
+    // но регистрация в нём условна ровно так же, как в многострочном.
+    if (CONTROL_RE.test(maskedLine)) {
+      for (
+        let match = INLINE_ASSIGN_RE.exec(maskedLine);
+        match !== null;
+        match = INLINE_ASSIGN_RE.exec(maskedLine)
+      ) {
+        conditionalVars.add(match[1] as string);
+      }
+      continue;
+    }
+
+    const enclosing = enclosingBlock;
+    const method = enclosing?.kind === "def" ? enclosing.method : undefined;
     // Только прямые операторы тела метода. Строка глубже — это `if`, `for`,
     // `try`, `with` или вложенный `def`: регистрация там условная, и принять её
     // значило бы обещать слово, которого в рантайме может не быть.
@@ -264,8 +288,9 @@ export function parseModule(text: string): PyModule {
       method !== undefined &&
       directBodyLine &&
       method.name.startsWith(resourceScan.methodPrefix) &&
-      stack.length >= 2 &&
-      (stack[stack.length - 2] as Block).kind === "class";
+      // Ровно «класс -> метод»: вложенный класс внутри init_* ресурсным не является.
+      stack.length === 2 &&
+      (stack[0] as Block).kind === "class";
 
     if (insideResourceMethod && method !== undefined) {
       if (superCallRe(method.name).test(maskedLine)) method.callsSuper = true;
@@ -275,7 +300,9 @@ export function parseModule(text: string): PyModule {
 
     const fromImport = FROM_IMPORT_RE.exec(maskedLine);
     if (fromImport !== null) {
-      const items = rawLine.slice(rawLine.indexOf(" import ") + " import ".length);
+      // Список имён берётся из маскированной строки: там комментарий уже стёрт,
+      // а имена — идентификаторы, маскирование их не меняет.
+      const items = fromImport[2] as string;
       for (const item of items.replace(/[()]/g, "").split(",")) {
         const parts = item.trim().split(/\s+as\s+/);
         const name = (parts[0] ?? "").trim();
@@ -326,8 +353,13 @@ function rawHeader(rawLine: string, classMatch: RegExpExecArray): string {
   return open >= 0 && close > open ? rawLine.slice(open + 1, close) : (classMatch[2] as string);
 }
 
+/**
+ * Вызов именно `super()`, а не `my_super()` или `obj.super()`: слева от имени
+ * обязана быть граница — начало строки или символ, не входящий в идентификатор
+ * и не точка.
+ */
 const superCallRe = (method: string): RegExp =>
-  new RegExp(`super\\s*\\([^)]*\\)\\s*\\.\\s*${method}\\s*\\(`);
+  new RegExp(`(?:^|[^A-Za-z0-9_.])super\\s*\\([^)]*\\)\\s*\\.\\s*${method}\\s*\\(`);
 
 
 /** Индекс закрывающей скобки для скобки в [open], либо -1. */
@@ -380,7 +412,13 @@ export function decodePyString(text: string, literal: PyString): string | undefi
       case "n": out += "\n"; break;
       case "t": out += "\t"; break;
       case "r": out += "\r"; break;
-      case "0": out += "\0"; break;
+      case "0": {
+        // `\0` — NUL, но `\012` — восьмеричная последовательность, а она вне
+        // контракта: принять её частично значило бы получить не то имя.
+        if (/[0-7]/.test(content[i + 1] ?? "")) return undefined;
+        out += "\0";
+        break;
+      }
       case "\\": out += "\\"; break;
       case "'": out += "'"; break;
       case '"': out += '"'; break;
