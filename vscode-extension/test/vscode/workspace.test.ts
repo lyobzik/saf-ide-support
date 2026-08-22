@@ -389,6 +389,40 @@ describe("жизненный цикл ресурсов приложения", ()
     workspace.dispose();
   });
 
+  it("удаление и возврат набора во время сканирования не теряют правку Python", async () => {
+    // Сценарий из ревью: пока Python-скан висит, набор удаляют, Python меняют и
+    // набор возвращают — всё до завершения скана.
+    workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
+    workspaceControl.files.set(appResources, resourcesText("before_change"));
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "before_change" } }');
+
+    let releasePython = (): void => undefined;
+    workspaceControl.pythonFindFilesGate = new Promise<void>((resolve) => {
+      releasePython = resolve;
+    });
+
+    const workspace = new SmartAppWorkspace();
+    const started = workspace.start();
+    await waitFor(() => workspaceControl.pythonFindFilesCalls > 0);
+
+    // Набор исчезает во время сканирования.
+    workspaceControl.files.delete(appDsl);
+    workspaceControl.watchers[0]!.deleted.fire(Uri.parse(appDsl));
+    // Python меняется, пока приложения нет.
+    workspaceControl.files.set(appResources, resourcesText("after_change"));
+    // Набор возвращается — тоже до конца сканирования.
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "after_change" } }');
+    workspaceControl.watchers[0]!.created.fire(Uri.parse(appDsl));
+
+    releasePython();
+    await started;
+
+    expect(
+      workspace.index.customKeywordsOf("w/app_b/static/references").map((k) => k.name),
+    ).toEqual(["after_change"]);
+    workspace.dispose();
+  });
+
   it("во время сканирования словарь не отдаётся", async () => {
     workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
     workspaceControl.files.set(appResources, resourcesText("scanned_action"));
