@@ -2,7 +2,9 @@
   "main_scenario": {
     "type": "form_filling",
     "form": "hello_form",
-    "answer": "{{ main_form.name }}"
+    "answer": "{{ main_form.name }}",
+    "field_position": "{% if main_form. %}",
+    "variable_position": "{% if  %}"
   },
   "broken_scenario": {
     "type": "form_filling",

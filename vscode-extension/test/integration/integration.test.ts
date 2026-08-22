@@ -35,6 +35,46 @@ async function waitFor<T>(probe: () => PromiseLike<T> | T, ok: (value: T) => boo
 const positionOf = (document: vscode.TextDocument, needle: string, offsetInNeedle = 0) =>
   document.positionAt(document.getText().indexOf(needle) + offsetInNeedle);
 
+const labelOf = (item: vscode.CompletionItem): string =>
+  typeof item.label === "string" ? item.label : item.label.label;
+
+/**
+ * Ждёт, пока предложены **все** ожидаемые пары «метка + вид».
+ *
+ * Проверять одну метку нельзя: слова из документа (`name`, `main_form`,
+ * `hello_form`) VS Code предлагает и сам — word-based suggestions включаются,
+ * когда провайдеры молчат, поэтому такой тест прошёл бы и с выключенным
+ * провайдером. Вид варианта задаём только мы.
+ *
+ * Ждать надо все пары сразу: индекс наполняется файл за файлом, и ожидание
+ * первого варианта завершилось бы, пока второго ещё нет, — тест падал бы
+ * случайно. По этой же причине здесь не проверяется просто непустой список.
+ */
+async function waitForCompletion(
+  document: vscode.TextDocument,
+  needle: string,
+  offsetInNeedle: number,
+  expected: ReadonlyArray<readonly [string, vscode.CompletionItemKind]>,
+): Promise<vscode.CompletionItem[]> {
+  let items: vscode.CompletionItem[] = [];
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const list = await vscode.commands.executeCommand<vscode.CompletionList>(
+      "vscode.executeCompletionItemProvider",
+      document.uri,
+      positionOf(document, needle, offsetInNeedle),
+    );
+    items = list?.items ?? [];
+    const missing = expected.filter(
+      ([label, kind]) => !items.some((item) => labelOf(item) === label && item.kind === kind),
+    );
+    if (missing.length === 0) return items;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  const offered = items.map((item) => `${labelOf(item)}:${item.kind}`).join(", ");
+  const wanted = expected.map(([label, kind]) => `${label}:${kind}`).join(", ");
+  assert.fail(`не дождались вариантов [${wanted}] в '${needle}'; предложено: [${offered}]`);
+}
+
 describe("SmartApp DSL в VS Code", () => {
   before(async () => {
     const extension = vscode.extensions.getExtension("ru-sber-smartapp.smartapp-dsl");
@@ -128,40 +168,37 @@ describe("SmartApp DSL в VS Code", () => {
   });
 
   it("предлагает имена форм в позиции form", async () => {
+    // hello_form есть и в тексте документа, поэтому ждём именно наш вариант:
+    // ссылку на сущность, а не совпавшее слово.
+    await waitForCompletion(await openWorkspaceFile(scenarioPath), '"form": "hello_form"', 9, [
+      ["hello_form", vscode.CompletionItemKind.Reference],
+    ]);
+  });
+
+  it("предлагает поля и переменную формы внутри Jinja", async () => {
+    // Обе жалобы на «No suggestions» пришли из живого редактора, а smoke-кейсов
+    // на Jinja-completion не было вовсе: корпус проверяет ядро, а не провайдер.
+    // Слова name и main_form стоят в самом документе, поэтому вид варианта здесь
+    // не украшение, а единственное отличие нашего предложения от word-based.
     const document = await openWorkspaceFile(scenarioPath);
-    const list = await waitFor(
-      () =>
-        vscode.commands.executeCommand<vscode.CompletionList>(
-          "vscode.executeCompletionItemProvider",
-          document.uri,
-          positionOf(document, '"form": "hello_form"', 9),
-        ),
-      (found) => (found?.items.length ?? 0) > 0,
-    );
-    const labels = list.items.map((item) =>
-      typeof item.label === "string" ? item.label : item.label.label,
-    );
-    assert.ok(labels.includes("hello_form"), `в списке нет hello_form: ${labels.join(", ")}`);
+
+    await waitForCompletion(document, '"{% if main_form. %}"', '"{% if main_form.'.length, [
+      ["name", vscode.CompletionItemKind.Field],
+    ]);
+    await waitForCompletion(document, '"{% if  %}"', '"{% if '.length, [
+      ["main_form", vscode.CompletionItemKind.Variable],
+    ]);
   });
 
   it("предлагает имена файлов шаблонов в позиции file", async () => {
     // До этой ветки VS Code показывал здесь word-based suggestions — слова из
     // документа. Проверяем в живом редакторе: варианты наши.
-    const document = await openWorkspaceFile(formsPath);
-    const list = await waitFor(
-      () =>
-        vscode.commands.executeCommand<vscode.CompletionList>(
-          "vscode.executeCompletionItemProvider",
-          document.uri,
-          positionOf(document, '"file": ""', 9),
-        ),
-      (found) => (found?.items.length ?? 0) > 0,
-    );
-    const labels = list.items.map((item) =>
-      typeof item.label === "string" ? item.label : item.label.label,
-    );
-    assert.ok(labels.includes("items.jinja2"), `в списке нет items.jinja2: ${labels.join(", ")}`);
-    assert.ok(labels.includes("other.jinja2"), `в списке нет other.jinja2: ${labels.join(", ")}`);
+    // Обе пары ждём вместе: реестр наполняется файл за файлом, и ожидание одного
+    // items.jinja2 завершилось бы раньше, чем в него попадёт other.jinja2.
+    await waitForCompletion(await openWorkspaceFile(formsPath), '"file": ""', 9, [
+      ["items.jinja2", vscode.CompletionItemKind.File],
+      ["other.jinja2", vscode.CompletionItemKind.File],
+    ]);
   });
 
   it("отдаёт семантические токены по зарегистрированной легенде", async () => {
