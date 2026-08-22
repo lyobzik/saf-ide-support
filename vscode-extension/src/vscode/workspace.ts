@@ -42,15 +42,17 @@ export class SmartAppWorkspace implements vscode.Disposable {
    */
   private readonly scannedRoots = new Set<string>();
 
-  /** Идёт ли сканирование Python прямо сейчас. */
-  private scanning = false;
-
   /**
-   * Просьба пересканировать, пришедшая во время идущего сканирования. Событие
-   * иначе теряется: вызов видит корень уже помеченным и завершается, а идущий
-   * scan падает и пометку снимает — повторить оказывается некому.
+   * Очередь сканирований Python: они выполняются строго по одному.
+   *
+   * Параллельные сканирования путались друг у друга под ногами — новый корень,
+   * появившийся во время скана, запускал второй скан, и падение любого из них
+   * оставляло чужие корни непросканированными. Очередь заодно решает и потерю
+   * события: просьба, пришедшая во время скана, не выбрасывается, а ждёт своей
+   * очереди и пересчитывает корни заново — уже после того, как упавший скан
+   * снял свои пометки.
    */
-  private rescanRequested = false;
+  private scanQueue: Promise<void> = Promise.resolve();
 
   /**
    * Все начатые асинхронные операции: чтения файлов и сканирования Python.
@@ -161,18 +163,23 @@ export class SmartAppWorkspace implements vscode.Disposable {
    * нескольких модулей, и какие из них относятся к новому корню, заранее не
    * известно.
    */
-  private async scanPython(notify = false): Promise<void> {
+  private scanPython(notify = false): Promise<void> {
+    const run = this.scanQueue.then(() => this.runPythonScan(notify));
+    // Штатную ошибку сканирования обрабатывает сам runPythonScan, поэтому это
+    // страховка от неожиданного отказа: без неё одно упавшее звено оставило бы
+    // очередь отклонённой навсегда, и сканирований больше не случилось бы.
+    // Тестом не покрыто сознательно — воспроизводить нечем.
+    this.scanQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Одно сканирование; вызывается только из очереди [scanPython]. */
+  private async runPythonScan(notify: boolean): Promise<void> {
     const roots = this.index.applicationRoots();
     const fresh = [...roots].filter((root) => !this.scannedRoots.has(root));
-    if (fresh.length === 0) {
-      // Помечено — но, возможно, тем сканированием, которое ещё идёт и может
-      // упасть. Тогда наше событие обязано пережить его провал.
-      if (this.scanning) this.rescanRequested = true;
-      return;
-    }
+    if (fresh.length === 0) return;
     for (const root of fresh) this.scannedRoots.add(root);
 
-    this.scanning = true;
     this.index.beginPythonScan();
     try {
       const files = await vscode.workspace.findFiles(PYTHON_GLOB, PYTHON_EXCLUDE);
@@ -182,14 +189,7 @@ export class SmartAppWorkspace implements vscode.Disposable {
       // приложение навсегда останется без словаря — повторной попытки не будет.
       for (const root of fresh) this.scannedRoots.delete(root);
     } finally {
-      this.scanning = false;
       this.index.endPythonScan();
-    }
-
-    if (this.rescanRequested) {
-      this.rescanRequested = false;
-      await this.scanPython(notify);
-      return;
     }
     if (notify) this.onIndexed.fire();
   }

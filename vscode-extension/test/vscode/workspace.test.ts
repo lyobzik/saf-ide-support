@@ -309,6 +309,56 @@ describe("жизненный цикл ресурсов приложения", ()
     workspace.dispose();
   });
 
+  it("новый корень во время сканирования не запускает параллельный скан", async () => {
+    // Два приложения: первое сканируется, второе появляется в это же время.
+    // Оба скана падают — ни один корень не должен остаться помеченным, иначе
+    // приложение без словаря дождётся только следующей случайной правки.
+    const otherRoot = "file:///w/app_c";
+    const otherDsl = `${otherRoot}/static/references/actions/actions.json`;
+    workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
+    workspaceControl.files.set(appResources, resourcesText("first_action"));
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "first_action" } }');
+    workspaceControl.files.set(
+      `${otherRoot}/app_config.py`,
+      "from app.resources.custom import R\nRESOURCES = R\n",
+    );
+    workspaceControl.files.set(`${otherRoot}/app/resources/custom.py`, resourcesText("second_action"));
+
+    // Все сканирования во время старта падают: сколько их будет — деталь
+    // очереди, а проверяется то, что ни один корень не остался помеченным.
+    workspaceControl.findFilesFailures = 10;
+    let releasePython = (): void => undefined;
+    workspaceControl.pythonFindFilesGate = new Promise<void>((resolve) => {
+      releasePython = resolve;
+    });
+
+    const workspace = new SmartAppWorkspace();
+    const started = workspace.start();
+    await waitFor(() => workspaceControl.pythonFindFilesCalls > 0);
+
+    // Второе приложение появляется, пока первое сканирование ещё висит.
+    workspaceControl.files.set(otherDsl, '{ "some_action": { "type": "second_action" } }');
+    workspaceControl.watchers[0]!.created.fire(Uri.parse(otherDsl));
+    await waitFor(() => workspaceControl.reads.includes(otherDsl));
+
+    releasePython();
+    await started;
+
+    // Оба словаря пусты, но ни один корень не «сгорел»: следующее событие
+    // обязано восстановить оба.
+    expect(workspace.index.customKeywordsOf("w/app_b/static/references")).toEqual([]);
+    expect(workspace.index.customKeywordsOf("w/app_c/static/references")).toEqual([]);
+
+    workspaceControl.findFilesFailures = 0;
+    workspaceControl.watchers[0]!.created.fire(Uri.parse(appDsl));
+    await waitFor(
+      () =>
+        workspace.index.customKeywordsOf("w/app_b/static/references").length > 0 &&
+        workspace.index.customKeywordsOf("w/app_c/static/references").length > 0,
+    );
+    workspace.dispose();
+  });
+
   it("во время сканирования словарь не отдаётся", async () => {
     workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
     workspaceControl.files.set(appResources, resourcesText("scanned_action"));
