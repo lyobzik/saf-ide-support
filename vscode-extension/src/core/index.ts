@@ -217,12 +217,19 @@ export class SmartAppIndex {
         const path = absolute(relative);
         return owned(path) ? this.pythonTexts.get(path) : undefined;
       },
-      // Существование каталога видно по известным индексу файлам: отдельного
-      // обхода файловой системы у ядра нет и быть не должно.
+      // Существование модуля или пакета видно по известным индексу файлам:
+      // отдельного обхода файловой системы у ядра нет и быть не должно.
       exists: (relative) => {
-        const prefix = `${absolute(relative)}/`;
+        const base = absolute(relative);
+        if (this.pythonTexts.has(`${base}${resourceScan.fileExtension}`)) {
+          return owned(`${base}${resourceScan.fileExtension}`);
+        }
+        const prefix = `${base}/`;
+        // Нужен хотя бы один свой файл: у вложенного приложения файлы с тем же
+        // префиксом чужие, и остановка на первом совпадении дала бы неверный
+        // ответ в зависимости от порядка обхода.
         for (const path of this.pythonTexts.keys()) {
-          if (path === absolute(relative) || path.startsWith(prefix)) return owned(path);
+          if (path.startsWith(prefix) && owned(path)) return true;
         }
         return false;
       },

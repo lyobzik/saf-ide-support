@@ -480,3 +480,82 @@ describe("слова приложения в семантике", () => {
     expect(result.items.map((i) => i.label)).toContain("external");
   });
 });
+
+describe("контракт exists: модуль приложения против библиотеки", () => {
+  // Та же таблица входов проверяется в SmartAppCustomKeywordsTest на стороне
+  // IDEA: разный ответ здесь меняет местами «пропавший модуль приложения» и
+  // «библиотечную базу», то есть пустой словарь и полный.
+  const ROOT = "file:///w/app";
+  const dslUri = `${ROOT}/static/references/actions/a.json`;
+  const scope = "w/app/static/references";
+
+  const withFiles = (files: Record<string, string>): SmartAppIndex => {
+    const idx = new SmartAppIndex();
+    idx.upsert(dslUri, '{ "some_action": { "type": "x" } }');
+    for (const [uri, text] of Object.entries(files)) idx.upsert(uri, text);
+    idx.markReady();
+    return idx;
+  };
+
+  const derived = (module: string): string =>
+    `from ${module} import BaseResources\n\nclass R(BaseResources):\n` +
+    '    def init_actions(self):\n        actions["custom"] = C\n';
+
+  it("пакет приложения есть — пропавший модуль гасит словарь", () => {
+    const index = withFiles({
+      [`${ROOT}/app_config.py`]: "from app.resources.custom import R\nRESOURCES = R\n",
+      [`${ROOT}/app/resources/custom.py`]: derived("app.resources.missing"),
+    });
+    expect(index.customKeywordsOf(scope)).toEqual([]);
+  });
+
+  it("библиотечный пакет — нормальный конец цепочки", () => {
+    const index = withFiles({
+      [`${ROOT}/app_config.py`]: "from app.resources.custom import R\nRESOURCES = R\n",
+      [`${ROOT}/app/resources/custom.py`]: derived("smart_kit.resources"),
+    });
+    expect(index.customKeywordsOf(scope).map((k) => k.name)).toEqual(["custom"]);
+  });
+
+  it("модуль-файл считается пакетом приложения", () => {
+    const index = withFiles({
+      [`${ROOT}/app_config.py`]: "from app.resources.custom import R\nRESOURCES = R\n",
+      [`${ROOT}/app/resources/custom.py`]: derived("single.missing"),
+      [`${ROOT}/single.py`]: "",
+    });
+    expect(index.customKeywordsOf(scope)).toEqual([]);
+  });
+
+  it("исключённый каталог пакетом приложения не считается", () => {
+    const index = withFiles({
+      [`${ROOT}/app_config.py`]: "from app.resources.custom import R\nRESOURCES = R\n",
+      [`${ROOT}/app/resources/custom.py`]: derived("venv.missing"),
+      [`${ROOT}/venv/lib/module.py`]: "",
+    });
+    expect(index.customKeywordsOf(scope).map((k) => k.name)).toEqual(["custom"]);
+  });
+
+  it("чужой файл в начале обхода не отменяет свой", () => {
+    // Внутри пакета `app` сначала лежит файл вложенного приложения, и только
+    // потом свой: ответ не должен зависеть от порядка обхода.
+    const index = withFiles({
+      [`${ROOT}/app/subapp/static/references/actions/b.json`]: '{ "x": { "type": "y" } }',
+      [`${ROOT}/app/subapp/nested.py`]: "",
+      [`${ROOT}/app_config.py`]: "from app.resources.custom import R\nRESOURCES = R\n",
+      [`${ROOT}/app/resources/custom.py`]: derived("app.resources.missing"),
+    });
+    expect(index.customKeywordsOf(scope)).toEqual([]);
+  });
+
+  it("файлы вложенного приложения внешнему не принадлежат", () => {
+    // Для внешнего приложения `subapp` — не его пакет: база оттуда неотличима
+    // от библиотечной, и цепочка заканчивается нормально.
+    const index = withFiles({
+      [`${ROOT}/app_config.py`]: "from app.resources.custom import R\nRESOURCES = R\n",
+      [`${ROOT}/app/resources/custom.py`]: derived("subapp.missing"),
+      [`${ROOT}/subapp/static/references/actions/b.json`]: '{ "x": { "type": "y" } }',
+      [`${ROOT}/subapp/app/nested.py`]: "",
+    });
+    expect(index.customKeywordsOf(scope).map((k) => k.name)).toEqual(["custom"]);
+  });
+});

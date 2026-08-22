@@ -26,7 +26,12 @@ export class SmartAppWorkspace implements vscode.Disposable {
    */
   private readonly generations = new Map<string, number>();
   private readonly disposables: vscode.Disposable[] = [];
-  private readonly pending = new Map<string, NodeJS.Timeout>();
+  /**
+   * Отложенные переиндексации по правкам в редакторе. Кроме таймера хранится
+   * его завершение: `settle()` обязан дождаться и дебаунса, иначе callback
+   * сработает уже после `markReady()`.
+   */
+  private readonly debounced = new Map<string, { timeout: NodeJS.Timeout; done: () => void }>();
   private readonly onIndexed = new vscode.EventEmitter<void>();
 
   /**
@@ -115,8 +120,7 @@ export class SmartAppWorkspace implements vscode.Disposable {
   }
 
   dispose(): void {
-    for (const timeout of this.pending.values()) clearTimeout(timeout);
-    this.pending.clear();
+    for (const key of [...this.debounced.keys()]) this.cancelScheduled(key);
     for (const disposable of this.disposables) disposable.dispose();
     this.onIndexed.dispose();
   }
@@ -182,11 +186,7 @@ export class SmartAppWorkspace implements vscode.Disposable {
   private async restoreFromDisk(document: vscode.TextDocument): Promise<void> {
     const key = document.uri.toString();
     if (!isDslFile(key) && !isPythonFile(key)) return;
-    const scheduled = this.pending.get(key);
-    if (scheduled !== undefined) {
-      clearTimeout(scheduled);
-      this.pending.delete(key);
-    }
+    this.cancelScheduled(key);
     if (isPythonFile(key)) await this.reloadPython(document.uri, true);
     else await this.reload(document.uri, true);
   }
@@ -249,15 +249,28 @@ export class SmartAppWorkspace implements vscode.Disposable {
     const key = document.uri.toString();
     if (!isDslFile(key) && !isPythonFile(key)) return;
 
-    const existing = this.pending.get(key);
-    if (existing !== undefined) clearTimeout(existing);
-    this.pending.set(
-      key,
-      setTimeout(() => {
-        this.pending.delete(key);
-        this.apply(key, document.getText(), true);
-      }, REINDEX_DELAY_MS),
+    // Новая правка отменяет прежнюю: её работа поглощена этой, поэтому ожидание
+    // старого таймера завершается — иначе `settle()` ждал бы отменённое.
+    this.cancelScheduled(key);
+    this.track(
+      new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          this.debounced.delete(key);
+          this.apply(key, document.getText(), true);
+          resolve();
+        }, REINDEX_DELAY_MS);
+        this.debounced.set(key, { timeout, done: resolve });
+      }),
     );
+  }
+
+  /** Снимает отложенную переиндексацию и закрывает её ожидание. */
+  private cancelScheduled(key: string): void {
+    const scheduled = this.debounced.get(key);
+    if (scheduled === undefined) return;
+    clearTimeout(scheduled.timeout);
+    this.debounced.delete(key);
+    scheduled.done();
   }
 
   private apply(uri: string, text: string, notify: boolean): void {

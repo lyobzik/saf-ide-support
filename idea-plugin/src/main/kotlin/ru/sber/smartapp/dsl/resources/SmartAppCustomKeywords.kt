@@ -1,6 +1,7 @@
 package ru.sber.smartapp.dsl.resources
 
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.vfs.VfsUtilCore
@@ -14,6 +15,7 @@ import com.intellij.psi.util.CachedValuesManager
 import com.intellij.psi.util.PsiModificationTracker
 import ru.sber.smartapp.dsl.SmartAppFiles
 import ru.sber.smartapp.dsl.contract.PathSpec
+import ru.sber.smartapp.dsl.contract.ResourceScanSpec
 import ru.sber.smartapp.dsl.resources.SmartAppResourceResolver.CustomKeyword
 
 /**
@@ -73,9 +75,17 @@ object SmartAppCustomKeywords {
                     return readText(project, file)
                 }
 
+                /**
+                 * Модуль или пакет приложения: файл `<path>.py` либо хотя бы один
+                 * `.py` внутри каталога `<path>`. Тот же ответ обязана давать
+                 * реализация в ядре расширения — иначе «пропавший модуль» и
+                 * «библиотечная база» поменяются местами.
+                 */
                 override fun exists(path: String): Boolean {
-                    val file = appRoot.findFileByRelativePath(path) ?: return false
-                    return ownedBy(file, appRoot)
+                    val module = appRoot.findFileByRelativePath(path + ResourceScanSpec.fileExtension)
+                    if (module != null && !module.isDirectory && ownedBy(module, appRoot)) return true
+                    val directory = appRoot.findFileByRelativePath(path) ?: return false
+                    return directory.isDirectory && containsOwnedModule(directory, appRoot)
                 }
             },
         )
@@ -93,6 +103,26 @@ object SmartAppCustomKeywords {
             }
             if (directory == appRoot) return true
             directory = directory.parent
+        }
+        return false
+    }
+
+    /**
+     * Есть ли внутри [directory] хоть один Python-файл приложения. Обход
+     * прерывается на первом попадании, исключённые каталоги (venv и прочие
+     * зависимости) не обходятся вовсе.
+     */
+    private fun containsOwnedModule(directory: VirtualFile, appRoot: VirtualFile): Boolean {
+        if (directory.name in ResourceScanSpec.excludedDirs) return false
+        for (child in directory.children) {
+            ProgressManager.checkCanceled()
+            if (child.isDirectory) {
+                if (containsOwnedModule(child, appRoot)) return true
+                continue
+            }
+            if (child.name.endsWith(ResourceScanSpec.fileExtension) && ownedBy(child, appRoot)) {
+                return true
+            }
         }
         return false
     }

@@ -229,6 +229,33 @@ describe("жизненный цикл ресурсов приложения", ()
     workspace.dispose();
   });
 
+  it("готовность ждёт отложенную переиндексацию открытого документа", async () => {
+    // Открытый документ ставит дебаунс-таймер; без ожидания он сработал бы уже
+    // после markReady(), и словарь появился бы «потом».
+    workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
+    workspaceControl.files.set(appResources, resourcesText("disk_action"));
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "disk_action" } }');
+    workspaceControl.openDocuments = [
+      {
+        uri: Uri.parse(appResources),
+        isDirty: false,
+        getText: () => resourcesText("typed_action"),
+      } as never,
+    ];
+
+    const workspace = new SmartAppWorkspace();
+    const started = workspace.start();
+    // Событие открытия приходит во время старта — как в живом редакторе.
+    workspaceControl.fireOpen(workspaceControl.openDocuments[0]!);
+    await started;
+
+    expect(workspace.index.isReady()).toBe(true);
+    expect(
+      workspace.index.customKeywordsOf("w/app_b/static/references").map((k) => k.name),
+    ).toEqual(["typed_action"]);
+    workspace.dispose();
+  });
+
   it("неудачное сканирование не помечает корень навсегда", async () => {
     workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
     workspaceControl.files.set(appResources, resourcesText("retried_action"));

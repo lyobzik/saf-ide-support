@@ -90,6 +90,54 @@ class SmartAppCustomKeywordsTest : BasePlatformTestCase() {
         )
     }
 
+    // ---- контракт exists: модуль приложения против библиотеки ----
+    //
+    // Та же таблица входов проверяется в test/core/resourceKeywords.test.ts:
+    // разный ответ меняет местами «пропавший модуль приложения» и «библиотечную
+    // базу», то есть пустой словарь и полный.
+
+    private fun derived(module: String): String =
+        "from $module import BaseResources\n\nclass R(BaseResources):\n" +
+            "    def init_actions(self):\n        actions[\"custom\"] = C\n"
+
+    private fun withActiveClass(module: String) {
+        myFixture.addFileToProject(
+            "app_config.py",
+            "from app.resources.custom import R\nRESOURCES = R\n",
+        )
+        myFixture.addFileToProject("app/resources/custom.py", derived(module))
+    }
+
+    fun testMissingApplicationModuleGivesNothing() {
+        withActiveClass("app.resources.missing")
+        assertEquals(emptyList<String>(), keywordsOf("static/references/actions/a.json").map { it.name })
+    }
+
+    fun testLibraryBaseIsNormalEnd() {
+        withActiveClass("smart_kit.resources")
+        assertEquals(listOf("custom"), keywordsOf("static/references/actions/a.json").map { it.name })
+    }
+
+    fun testModuleFileCountsAsApplicationPackage() {
+        withActiveClass("single.missing")
+        myFixture.addFileToProject("single.py", "")
+        assertEquals(emptyList<String>(), keywordsOf("static/references/actions/a.json").map { it.name })
+    }
+
+    fun testNestedApplicationFilesAreNotOurs() {
+        withActiveClass("subapp.missing")
+        myFixture.addFileToProject("subapp/static/references/actions/b.json", """{ "x": { "type": "y" } }""")
+        myFixture.addFileToProject("subapp/app/nested.py", "")
+        assertEquals(listOf("custom"), keywordsOf("static/references/actions/a.json").map { it.name })
+    }
+
+    fun testExcludedDirectoryIsNotApplicationPackage() {
+        withActiveClass("venv.missing")
+        myFixture.addFileToProject("venv/lib/module.py", "")
+        // venv — зависимости, а не код приложения: база оттуда библиотечная.
+        assertEquals(listOf("custom"), keywordsOf("static/references/actions/a.json").map { it.name })
+    }
+
     fun testCompletionOffersCustomKeyword() {
         app("", "custom_action")
         val items = completeTypeValue("static/references/actions/completion.json")

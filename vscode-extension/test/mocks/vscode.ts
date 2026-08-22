@@ -261,6 +261,14 @@ export const workspaceControl = {
   /** Сколько ближайших Python-сканирований должны завершиться ошибкой. */
   findFilesFailures: 0,
 
+  /** Подписчики на открытие документа. */
+  openListeners: [] as ((document: TextDocument) => void)[],
+
+  /** Имитирует открытие документа в редакторе. */
+  fireOpen(document: TextDocument): void {
+    for (const listener of this.openListeners) listener(document);
+  },
+
   /** Имитирует закрытие документа в редакторе. */
   fireClose(document: TextDocument): void {
     for (const listener of this.closeListeners) listener(document);
@@ -270,6 +278,7 @@ export const workspaceControl = {
     this.files.clear();
     this.watchers = [];
     this.closeListeners = [];
+    this.openListeners = [];
     this.openDocuments = [];
     this.findFilesFailures = 0;
     this.findFilesGate = Promise.resolve();
@@ -327,8 +336,13 @@ Object.assign(workspace, {
     return new Disposable(() => undefined);
   },
 
-  onDidOpenTextDocument(_listener: unknown): Disposable {
-    return new Disposable(() => undefined);
+  onDidOpenTextDocument(listener: (document: TextDocument) => void): Disposable {
+    workspaceControl.openListeners.push(listener);
+    return new Disposable(() => {
+      workspaceControl.openListeners = workspaceControl.openListeners.filter(
+        (candidate) => candidate !== listener,
+      );
+    });
   },
 
   onDidCloseTextDocument(listener: (document: TextDocument) => void): Disposable {
