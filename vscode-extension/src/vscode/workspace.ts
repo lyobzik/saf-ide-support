@@ -175,7 +175,7 @@ export class SmartAppWorkspace implements vscode.Disposable {
 
   /** Одно сканирование; вызывается только из очереди [scanPython]. */
   private async runPythonScan(notify: boolean): Promise<void> {
-    const roots = this.index.applicationRoots();
+    const roots = this.forgetVanishedRoots();
     const fresh = [...roots].filter((root) => !this.scannedRoots.has(root));
     if (fresh.length === 0) return;
     for (const root of fresh) this.scannedRoots.add(root);
@@ -279,7 +279,23 @@ export class SmartAppWorkspace implements vscode.Disposable {
     this.nextGeneration(key);
     this.texts.delete(key);
     this.index.remove(key);
+    // Именно здесь приложение может исчезнуть целиком: забываем его сразу, а не
+    // при следующем сканировании — к тому моменту набор уже может вернуться, и
+    // корень выглядел бы просканированным, хотя Python за это время сменился.
+    this.forgetVanishedRoots();
     this.onIndexed.fire();
+  }
+
+  /**
+   * Снимает пометку «просканирован» с корней, которых больше нет, и отдаёт
+   * актуальное множество корней приложений.
+   */
+  private forgetVanishedRoots(): Set<string> {
+    const roots = this.index.applicationRoots();
+    for (const scanned of [...this.scannedRoots]) {
+      if (!roots.has(scanned)) this.scannedRoots.delete(scanned);
+    }
+    return roots;
   }
 
   /** Дебаунс переиндексации по правкам в редакторе. */

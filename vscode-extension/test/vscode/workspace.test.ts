@@ -359,6 +359,36 @@ describe("жизненный цикл ресурсов приложения", ()
     workspace.dispose();
   });
 
+  it("вернувшееся приложение сканируется заново", async () => {
+    // Приложение исчезло (удалён последний DSL-файл), Python за это время
+    // изменился, приложение вернулось. Без забывания корня повторного скана не
+    // случится, и словарь останется старым.
+    workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
+    workspaceControl.files.set(appResources, resourcesText("before_removal"));
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "before_removal" } }');
+
+    const workspace = new SmartAppWorkspace();
+    await workspace.start();
+    const names = () =>
+      workspace.index.customKeywordsOf("w/app_b/static/references").map((k) => k.name);
+    expect(names()).toEqual(["before_removal"]);
+
+    // Набор исчезает целиком.
+    workspaceControl.files.delete(appDsl);
+    workspaceControl.watchers[0]!.deleted.fire(Uri.parse(appDsl));
+    await waitFor(() => names().length === 0);
+
+    // Пока приложения не было, ресурсы подменили, а событий по ним не приходило.
+    workspaceControl.files.set(appResources, resourcesText("after_return"));
+
+    // Набор возвращается.
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "after_return" } }');
+    workspaceControl.watchers[0]!.created.fire(Uri.parse(appDsl));
+    await waitFor(() => names().length > 0);
+    expect(names()).toEqual(["after_return"]);
+    workspace.dispose();
+  });
+
   it("во время сканирования словарь не отдаётся", async () => {
     workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
     workspaceControl.files.set(appResources, resourcesText("scanned_action"));
