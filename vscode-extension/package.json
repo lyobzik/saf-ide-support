@@ -86,13 +86,14 @@
   },
   "scripts": {
     "verify:contract": "node scripts/verify-contract.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "compile": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "package": "node scripts/package.mjs",
     "vscode:prepublish": "npm run compile",
     "test:unit": "vitest run",
     "test:integration": "npm run compile && node scripts/build-tests.mjs && vscode-test",
-    "test": "npm run verify:contract && npm run test:unit",
+    "test": "npm run verify:contract && npm run typecheck && npm run test:unit",
     "lint": "eslint src test"
   },
   "devDependencies": {

@@ -125,6 +125,9 @@ test:vscode:unit:
   extends: .node
   stage: test
   script:
+    # Типы: vitest их не проверяет, esbuild тоже — без этого шага ошибка типа
+    # доезжает до пользователя, а тест с ней остаётся зелёным.
+    - npm run typecheck
     # Ядро, адаптер (на фейковом vscode) и conformance-корпус.
     - npm run test:unit
 
