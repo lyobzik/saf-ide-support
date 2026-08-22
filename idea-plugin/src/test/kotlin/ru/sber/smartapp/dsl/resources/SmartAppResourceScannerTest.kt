@@ -300,4 +300,21 @@ class SmartAppResourceScannerTest {
             registrations(inMethod("""actions["a@BS0b"] = C""".replace("@BS", BACKSLASH))).single().name,
         )
     }
+
+    @Test
+    fun classInsideConditionalBlockIsNotModuleLevel() {
+        val conditional = "if dev:\n" +
+            "    class CustomAppResources(SmartAppResources):\n" +
+            "        def init_actions(self):\n" +
+            """            actions["conditional"] = C""" + "\n"
+        assertEquals(emptyList<Any>(), SmartAppResourceScanner.parseModule(conditional).classes)
+
+        val guarded = "try:\n    class R(SmartAppResources):\n        pass\n" +
+            "except ImportError:\n    R = None\n"
+        assertEquals(emptyList<Any>(), SmartAppResourceScanner.parseModule(guarded).classes)
+
+        val after = "if dev:\n    x = 1\n\nclass R(SmartAppResources):\n" +
+            "    def init_actions(self):\n        pass\n"
+        assertEquals(listOf("R"), SmartAppResourceScanner.parseModule(after).classes.map { it.name })
+    }
 }

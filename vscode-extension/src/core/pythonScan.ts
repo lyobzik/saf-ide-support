@@ -213,7 +213,7 @@ interface MethodDraft {
 }
 interface Block {
   readonly indent: number;
-  readonly kind: "class" | "def";
+  readonly kind: "class" | "def" | "control";
   readonly cls?: ClassDraft;
   readonly method?: MethodDraft;
   /** Отступ тела: у `def` — отступ первой строки тела, дальше он фиксирован. */
@@ -275,6 +275,10 @@ export function parseModule(text: string): PyModule {
       ) {
         conditionalVars.add(match[1] as string);
       }
+      // Блок кладётся в стек: иначе `class` внутри многострочного `if` увиделся
+      // бы при пустом стеке и попал в модель как модульный, хотя его
+      // существование условно.
+      stack.push({ indent: line.indent, kind: "control" });
       continue;
     }
 

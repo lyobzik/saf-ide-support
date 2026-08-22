@@ -65,10 +65,20 @@ object SmartAppCustomKeywords {
     }
 
     private fun compute(project: Project, appRoot: VirtualFile): List<CustomKeyword> =
-        SmartAppResourceResolver.customKeywords { relative ->
-            val file = appRoot.findFileByRelativePath(relative)
-            if (file == null || file.isDirectory || !ownedBy(file, appRoot)) null else readText(project, file)
-        }
+        SmartAppResourceResolver.customKeywords(
+            object : SmartAppResourceResolver.AppFiles {
+                override fun read(relativePath: String): String? {
+                    val file = appRoot.findFileByRelativePath(relativePath) ?: return null
+                    if (file.isDirectory || !ownedBy(file, appRoot)) return null
+                    return readText(project, file)
+                }
+
+                override fun exists(path: String): Boolean {
+                    val file = appRoot.findFileByRelativePath(path) ?: return false
+                    return ownedBy(file, appRoot)
+                }
+            },
+        )
 
     /**
      * Файл принадлежит именно этому приложению: ближайший корень с

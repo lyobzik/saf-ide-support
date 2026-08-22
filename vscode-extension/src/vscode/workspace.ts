@@ -38,12 +38,12 @@ export class SmartAppWorkspace implements vscode.Disposable {
   private readonly scannedRoots = new Set<string>();
 
   /**
-   * Идущие сканирования Python. `start()` обязан дождаться и тех, что запустил
-   * не он сам: досканирование, начатое при индексации DSL-файла, иначе
-   * продолжалось бы уже после `markReady()`, и словарь приложения оказался бы
-   * пуст при «готовом» индексе.
+   * Все начатые асинхронные операции: чтения файлов и сканирования Python.
+   * `start()` обязан дождаться и тех, что запустил не он сам — досканирование
+   * из-за нового набора, чтение по событию watcher'а, обработку dirty-документа.
+   * Иначе индекс объявляет себя готовым, пока работа ещё идёт.
    */
-  private readonly pendingScans = new Set<Promise<void>>();
+  private readonly inFlight = new Set<Promise<void>>();
 
   /** Срабатывает после изменения индекса — подписчики пересчитывают диагностику. */
   readonly onDidUpdate = this.onIndexed.event;
@@ -70,11 +70,11 @@ export class SmartAppWorkspace implements vscode.Disposable {
     this.disposables.push(
       watcher,
       pythonWatcher,
-      watcher.onDidCreate((uri) => void this.reload(uri, true)),
-      watcher.onDidChange((uri) => void this.reload(uri, true)),
+      watcher.onDidCreate((uri) => this.track(this.reload(uri, true))),
+      watcher.onDidChange((uri) => this.track(this.reload(uri, true))),
       watcher.onDidDelete((uri) => this.forget(uri)),
-      pythonWatcher.onDidCreate((uri) => void this.reloadPython(uri, true)),
-      pythonWatcher.onDidChange((uri) => void this.reloadPython(uri, true)),
+      pythonWatcher.onDidCreate((uri) => this.track(this.reloadPython(uri, true))),
+      pythonWatcher.onDidChange((uri) => this.track(this.reloadPython(uri, true))),
       pythonWatcher.onDidDelete((uri) => this.forget(uri)),
       // Правки в редакторе видны до сохранения — как в IDEA, где индекс
       // работает по PSI незасохранённого документа.
@@ -82,7 +82,9 @@ export class SmartAppWorkspace implements vscode.Disposable {
       vscode.workspace.onDidOpenTextDocument((document) => this.scheduleFromDocument(document)),
       // Закрытие без сохранения возвращает индекс к содержимому диска: иначе
       // слово, добавленное и не сохранённое, осталось бы в словаре навсегда.
-      vscode.workspace.onDidCloseTextDocument((document) => void this.restoreFromDisk(document)),
+      vscode.workspace.onDidCloseTextDocument((document) =>
+        this.track(this.restoreFromDisk(document)),
+      ),
     );
 
     const files = await vscode.workspace.findFiles(FILE_GLOB);
@@ -91,7 +93,6 @@ export class SmartAppWorkspace implements vscode.Disposable {
     // Python сканируется после DSL: корни приложений известны только по
     // найденным наборам static/references.
     await this.scanPython();
-    while (this.pendingScans.size > 0) await Promise.all([...this.pendingScans]);
 
     // Уже открытые документы могли измениться до активации расширения: их
     // содержимое в редакторе новее того, что лежит на диске.
@@ -105,6 +106,10 @@ export class SmartAppWorkspace implements vscode.Disposable {
     // Готовность — только после обоих первичных сканирований: иначе кастомные
     // слова первые секунды выглядели бы неизвестными, а потом «вдруг»
     // становились ключевыми.
+    // Работа могла породить работу: dirty-документ способен открыть новый
+    // набор, событие watcher'а — новый файл. Ждём, пока очередь опустеет.
+    await this.settle();
+
     this.index.markReady();
     this.onIndexed.fire();
   }
@@ -152,16 +157,25 @@ export class SmartAppWorkspace implements vscode.Disposable {
     try {
       const files = await vscode.workspace.findFiles(PYTHON_GLOB, PYTHON_EXCLUDE);
       await Promise.all(files.map((uri) => this.reloadPython(uri)));
+    } catch {
+      // Сканирование не удалось: корень нельзя оставлять помеченным, иначе
+      // приложение навсегда останется без словаря — повторной попытки не будет.
+      for (const root of fresh) this.scannedRoots.delete(root);
     } finally {
       this.index.endPythonScan();
     }
     if (notify) this.onIndexed.fire();
   }
 
-  /** Запоминает идущее сканирование, чтобы `start()` мог его дождаться. */
-  private track(scan: Promise<void>): void {
-    this.pendingScans.add(scan);
-    void scan.finally(() => this.pendingScans.delete(scan));
+  /** Запоминает начатую операцию, чтобы `start()` мог её дождаться. */
+  private track(operation: Promise<void>): void {
+    this.inFlight.add(operation);
+    void operation.finally(() => this.inFlight.delete(operation));
+  }
+
+  /** Ждёт, пока очередь начатых операций опустеет, включая порождённые ими. */
+  private async settle(): Promise<void> {
+    while (this.inFlight.size > 0) await Promise.all([...this.inFlight]);
   }
 
   /** Возвращает файл к содержимому диска после закрытия несохранённого документа. */

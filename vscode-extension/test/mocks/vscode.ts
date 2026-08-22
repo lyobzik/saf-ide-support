@@ -251,6 +251,15 @@ export const workspaceControl = {
   stats: [] as string[],
   /** Подписчики на закрытие документа: тест закрывает документ сам. */
   closeListeners: [] as ((document: TextDocument) => void)[],
+  /** Открытые документы, которые расширение видит на старте. */
+  set openDocuments(documents: TextDocument[]) {
+    workspace.textDocuments = documents;
+  },
+  get openDocuments(): TextDocument[] {
+    return workspace.textDocuments;
+  },
+  /** Сколько ближайших Python-сканирований должны завершиться ошибкой. */
+  findFilesFailures: 0,
 
   /** Имитирует закрытие документа в редакторе. */
   fireClose(document: TextDocument): void {
@@ -261,6 +270,8 @@ export const workspaceControl = {
     this.files.clear();
     this.watchers = [];
     this.closeListeners = [];
+    this.openDocuments = [];
+    this.findFilesFailures = 0;
     this.findFilesGate = Promise.resolve();
     this.readGates = [];
     this.reads = [];
@@ -271,8 +282,14 @@ export const workspaceControl = {
 };
 
 Object.assign(workspace, {
-  async findFiles(_glob: string): Promise<Uri[]> {
+  async findFiles(_glob: string, _exclude?: string): Promise<Uri[]> {
     await workspaceControl.findFilesGate;
+    // Падение имитируется только для Python-сканирования: DSL-скан у теста
+    // должен пройти, иначе не с чего появиться корню приложения.
+    if (workspaceControl.findFilesFailures > 0 && _glob.includes(".py")) {
+      workspaceControl.findFilesFailures--;
+      throw new Error("findFiles failed");
+    }
     return [...workspaceControl.files.keys()].map((uri) => Uri.parse(uri));
   },
 

@@ -28,8 +28,16 @@ export interface CustomKeyword {
   readonly file: string;
 }
 
-/** Чтение файла приложения по пути относительно его корня. */
-export type ModuleReader = (relativePath: string) => string | undefined;
+/**
+ * Доступ к файлам приложения. Кроме чтения нужен и предикат существования: по
+ * нему отличается «модуль вне приложения» (библиотечная база — нормальный конец
+ * цепочки) от «модуль приложения, которого нет» (обрыв, слова не подтверждены).
+ */
+export interface AppFiles {
+  read(relativePath: string): string | undefined;
+  /** Есть ли в приложении файл или каталог по этому пути. */
+  exists(path: string): boolean;
+}
 
 interface ClassRef {
   readonly file: string;
@@ -40,8 +48,8 @@ interface ClassRef {
  * Ключевые слова активного класса ресурсов приложения.
  * Пустой список — «нечего предложить»: это не ошибка и диагностики не даёт.
  */
-export function customKeywords(read: ModuleReader): CustomKeyword[] {
-  const configText = read(resourceScan.configFile);
+export function customKeywords(files: AppFiles): CustomKeyword[] {
+  const configText = files.read(resourceScan.configFile);
   if (configText === undefined) return [];
   const config = parseModule(configText);
 
@@ -54,7 +62,7 @@ export function customKeywords(read: ModuleReader): CustomKeyword[] {
   const start = classRefOf(value, config, resourceScan.configFile);
   if (start === undefined) return [];
 
-  const chain = resolveChain(start, read);
+  const chain = resolveChain(start, files);
   if (chain === undefined) return [];
   return effectiveKeywords(chain);
 }
@@ -95,7 +103,7 @@ interface ChainEntry {
  * множественное наследование, цикл, исчерпанная глубина и класс, которого нет в
  * прочитанном модуле, — ошибка.
  */
-function resolveChain(start: ClassRef, read: ModuleReader): ChainEntry[] | undefined {
+function resolveChain(start: ClassRef, files: AppFiles): ChainEntry[] | undefined {
   const chain: ChainEntry[] = [];
   const visited = new Set<string>();
   let current: ClassRef | undefined = start;
@@ -107,11 +115,14 @@ function resolveChain(start: ClassRef, read: ModuleReader): ChainEntry[] | undef
     if (visited.has(key)) return undefined; // циклический импорт
     visited.add(key);
 
-    const text = readModule(read, current.file);
+    const text = readModule(files, current.file);
     if (text === undefined) {
-      // Модуль вне приложения: это база фреймворка, дальше идти некуда. Но если
-      // так оборвался сам активный класс — подтверждать нечего.
-      return chain.length === 0 ? undefined : finish(chain);
+      // Модуль не прочитан. Если его корневой пакет есть в приложении, значит
+      // это наш модуль, которого не хватает: цепочку подтвердить нечем. Если
+      // пакета нет — это библиотека (база фреймворка), и цепочка закончилась.
+      const expectedInApp = files.exists(rootPackageOf(current.file));
+      if (expectedInApp || chain.length === 0) return undefined;
+      return finish(chain);
     }
     const module = parseModule(text);
     const name: string = current.name;
@@ -138,13 +149,18 @@ function finish(chain: ChainEntry[]): ChainEntry[] {
 }
 
 /** Текст модуля: сначала `a/b/c.py`, затем `a/b/c/__init__.py`. */
-function readModule(read: ModuleReader, file: string): string | undefined {
+function readModule(files: AppFiles, file: string): string | undefined {
   if (file.length === 0 || hasExcludedSegment(file)) return undefined;
-  const direct = read(file);
+  const direct = files.read(file);
   if (direct !== undefined) return direct;
   if (!file.endsWith(resourceScan.fileExtension)) return undefined;
   const asPackage = `${file.slice(0, -resourceScan.fileExtension.length)}/${resourceScan.packageInitFile}`;
-  return hasExcludedSegment(asPackage) ? undefined : read(asPackage);
+  return hasExcludedSegment(asPackage) ? undefined : files.read(asPackage);
+}
+
+/** Корневой пакет пути модуля: `app/resources/x.py` -> `app`. */
+function rootPackageOf(file: string): string {
+  return file.split("/")[0] ?? file;
 }
 
 /** Путь внутри исключённого каталога (venv, site-packages, …) — не код приложения. */

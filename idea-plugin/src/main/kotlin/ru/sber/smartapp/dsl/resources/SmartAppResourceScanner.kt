@@ -219,6 +219,7 @@ object SmartAppResourceScanner {
     private class Block(
         val indent: Int,
         val isClass: Boolean,
+        val isControl: Boolean = false,
         val cls: ClassDraft?,
         val method: MethodDraft?,
         /** Отступ тела: у `def` — отступ первой строки тела, дальше он фиксирован. */
@@ -275,6 +276,10 @@ object SmartAppResourceScanner {
                 for (match in INLINE_ASSIGN_RE.findAll(maskedLine)) {
                     conditionalVars.add(match.groupValues[1])
                 }
+                // Блок кладётся в стек: иначе `class` внутри многострочного `if`
+                // увиделся бы при пустом стеке и попал в модель как модульный,
+                // хотя его существование условно.
+                stack.add(Block(line.indent, isClass = false, isControl = true, cls = null, method = null))
                 continue
             }
 

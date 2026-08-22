@@ -31,9 +31,17 @@ object SmartAppResourceResolver {
         val file: String,
     )
 
-    /** Чтение файла приложения по пути относительно его корня. */
-    fun interface ModuleReader {
+    /**
+     * Доступ к файлам приложения. Кроме чтения нужен и предикат существования:
+     * по нему отличается «модуль вне приложения» (библиотечная база — нормальный
+     * конец цепочки) от «модуль приложения, которого нет» (обрыв, слова не
+     * подтверждены).
+     */
+    interface AppFiles {
         fun read(relativePath: String): String?
+
+        /** Есть ли в приложении файл или каталог по этому пути. */
+        fun exists(path: String): Boolean
     }
 
     private data class ClassRef(val file: String, val name: String)
@@ -44,8 +52,8 @@ object SmartAppResourceResolver {
      * Ключевые слова активного класса ресурсов приложения.
      * Пустой список — «нечего предложить»: это не ошибка и диагностики не даёт.
      */
-    fun customKeywords(read: ModuleReader): List<CustomKeyword> {
-        val configText = read.read(ResourceScanSpec.configFile) ?: return emptyList()
+    fun customKeywords(files: AppFiles): List<CustomKeyword> {
+        val configText = files.read(ResourceScanSpec.configFile) ?: return emptyList()
         val config = SmartAppResourceScanner.parseModule(configText)
 
         // Присваивание RESOURCES в ветке `if` делает выбор класса динамическим:
@@ -54,7 +62,7 @@ object SmartAppResourceResolver {
         val value = config.topLevelVars[ResourceScanSpec.resourcesVariable] ?: return emptyList()
 
         val start = classRefOf(value, config, ResourceScanSpec.configFile) ?: return emptyList()
-        val chain = resolveChain(start, read) ?: return emptyList()
+        val chain = resolveChain(start, files) ?: return emptyList()
         return effectiveKeywords(chain)
     }
 
@@ -90,7 +98,7 @@ object SmartAppResourceResolver {
      * множественное наследование, цикл, исчерпанная глубина и класс, которого
      * нет в прочитанном модуле, — ошибка.
      */
-    private fun resolveChain(start: ClassRef, read: ModuleReader): List<ChainEntry>? {
+    private fun resolveChain(start: ClassRef, files: AppFiles): List<ChainEntry>? {
         val chain = ArrayList<ChainEntry>()
         val visited = HashSet<String>()
         var current: ClassRef? = start
@@ -101,10 +109,15 @@ object SmartAppResourceResolver {
             val ref = current
             if (!visited.add("${ref.file}#${ref.name}")) return null // циклический импорт
 
-            val text = readModule(read, ref.file)
-                // Модуль вне приложения: это база фреймворка, дальше идти некуда.
-                // Но если так оборвался сам активный класс — подтверждать нечего.
-                ?: return if (chain.isEmpty()) null else chain.asReversed().toList()
+            val text = readModule(files, ref.file)
+            if (text == null) {
+                // Модуль не прочитан. Если его корневой пакет есть в приложении,
+                // значит это наш модуль, которого не хватает: подтвердить цепочку
+                // нечем. Если пакета нет — это библиотека, и цепочка закончилась.
+                val expectedInApp = files.exists(rootPackageOf(ref.file))
+                if (expectedInApp || chain.isEmpty()) return null
+                return chain.asReversed().toList()
+            }
             val module = SmartAppResourceScanner.parseModule(text)
             val cls = module.classes.firstOrNull { it.name == ref.name } ?: return null
 
@@ -120,14 +133,17 @@ object SmartAppResourceResolver {
     }
 
     /** Текст модуля: сначала `a/b/c.py`, затем `a/b/c/__init__.py`. */
-    private fun readModule(read: ModuleReader, file: String): String? {
+    private fun readModule(files: AppFiles, file: String): String? {
         if (file.isEmpty() || hasExcludedSegment(file)) return null
-        read.read(file)?.let { return it }
+        files.read(file)?.let { return it }
         if (!file.endsWith(ResourceScanSpec.fileExtension)) return null
         val asPackage = file.dropLast(ResourceScanSpec.fileExtension.length) +
             "/" + ResourceScanSpec.packageInitFile
-        return if (hasExcludedSegment(asPackage)) null else read.read(asPackage)
+        return if (hasExcludedSegment(asPackage)) null else files.read(asPackage)
     }
+
+    /** Корневой пакет пути модуля: `app/resources/x.py` -> `app`. */
+    private fun rootPackageOf(file: String): String = file.substringBefore('/')
 
     /** Путь внутри исключённого каталога (venv, site-packages, …) — не код приложения. */
     fun hasExcludedSegment(path: String): Boolean =

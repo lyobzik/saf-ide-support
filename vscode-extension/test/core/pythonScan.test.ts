@@ -261,3 +261,29 @@ describe("однострочные конструкции и границы", ()
     expect(registrationsOf(inMethod('actions["a\\0b"] = C'))[0]?.name).toBe("a\0b");
   });
 });
+
+describe("условные объявления верхнего уровня", () => {
+  it("класс внутри многострочного if модульным не считается", () => {
+    const module = parseModule(
+      "if dev:\n" +
+        "    class CustomAppResources(SmartAppResources):\n" +
+        "        def init_actions(self):\n" +
+        '            actions["conditional"] = C\n',
+    );
+    expect(module.classes).toEqual([]);
+  });
+
+  it("класс внутри try тоже условный", () => {
+    const module = parseModule(
+      "try:\n    class R(SmartAppResources):\n        pass\nexcept ImportError:\n    R = None\n",
+    );
+    expect(module.classes).toEqual([]);
+  });
+
+  it("класс после условного блока остаётся модульным", () => {
+    const module = parseModule(
+      "if dev:\n    x = 1\n\nclass R(SmartAppResources):\n    def init_actions(self):\n        pass\n",
+    );
+    expect(module.classes.map((c) => c.name)).toEqual(["R"]);
+  });
+});

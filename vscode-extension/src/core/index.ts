@@ -208,10 +208,24 @@ export class SmartAppIndex {
     const cached = this.customCache.get(appRoot);
     if (cached !== undefined) return cached;
 
-    const resolved = customKeywords((relative) => {
-      const path = appRoot.length === 0 ? relative : `${appRoot}/${relative}`;
-      if (ownerApplicationRoot(path, roots) !== appRoot) return undefined;
-      return this.pythonTexts.get(path);
+    const absolute = (relative: string): string =>
+      appRoot.length === 0 ? relative : `${appRoot}/${relative}`;
+    const owned = (path: string): boolean => ownerApplicationRoot(path, roots) === appRoot;
+
+    const resolved = customKeywords({
+      read: (relative) => {
+        const path = absolute(relative);
+        return owned(path) ? this.pythonTexts.get(path) : undefined;
+      },
+      // Существование каталога видно по известным индексу файлам: отдельного
+      // обхода файловой системы у ядра нет и быть не должно.
+      exists: (relative) => {
+        const prefix = `${absolute(relative)}/`;
+        for (const path of this.pythonTexts.keys()) {
+          if (path === absolute(relative) || path.startsWith(prefix)) return owned(path);
+        }
+        return false;
+      },
     });
     this.customCache.set(appRoot, resolved);
     return resolved;

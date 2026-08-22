@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { customKeywords, hasExcludedSegment, type ModuleReader } from "../../src/core/resourceKeywords";
+import { customKeywords, hasExcludedSegment, type AppFiles } from "../../src/core/resourceKeywords";
 import { SmartAppIndex } from "../../src/core/index";
 import { documentContext } from "../../src/core/semantics";
 import { semanticTokens, SemanticTokenType } from "../../src/core/semanticTokens";
@@ -11,7 +11,11 @@ import { completionAt } from "../../src/core/completion";
  * переопределение), а не объединяются.
  */
 
-const reader = (files: Record<string, string>): ModuleReader => (path) => files[path];
+const reader = (files: Record<string, string>): AppFiles => ({
+  read: (path) => files[path],
+  exists: (path) =>
+    Object.keys(files).some((known) => known === path || known.startsWith(`${path}/`)),
+});
 
 const CONFIG = [
   "from app.resources.custom_app_resources import CustomAppResources",
@@ -234,6 +238,20 @@ describe("обрыв цепочки", () => {
         "app_config.py": CONFIG,
         "app/resources/custom_app_resources.py":
           "class CustomAppResources(MissingBase):\n" +
+          '    def init_actions(self):\n        actions["custom"] = C\n',
+      }),
+    ).toEqual([]);
+  });
+
+  it("отсутствующий модуль приложения гасит словарь", () => {
+    // Корневой пакет `app` в приложении есть, значит модуль наш и его не
+    // хватает: это обрыв, а не библиотечная база.
+    expect(
+      chainOf({
+        "app_config.py": CONFIG,
+        "app/resources/custom_app_resources.py":
+          "from app.resources.missing import BaseResources\n\n" +
+          "class CustomAppResources(BaseResources):\n" +
           '    def init_actions(self):\n        actions["custom"] = C\n',
       }),
     ).toEqual([]);

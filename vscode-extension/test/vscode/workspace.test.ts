@@ -206,6 +206,50 @@ describe("жизненный цикл ресурсов приложения", ()
     workspace.dispose();
   });
 
+  it("готовность ждёт и работу, порождённую dirty-документом", async () => {
+    // Открытый несохранённый DSL-файл может открыть новый набор уже после
+    // первичного сканирования: markReady() обязан дождаться и этой работы.
+    workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
+    workspaceControl.files.set(appResources, resourcesText("dirty_action"));
+    workspaceControl.openDocuments = [
+      {
+        uri: Uri.parse(appDsl),
+        isDirty: true,
+        getText: () => '{ "some_action": { "type": "dirty_action" } }',
+      } as never,
+    ];
+
+    const workspace = new SmartAppWorkspace();
+    await workspace.start();
+
+    expect(workspace.index.isReady()).toBe(true);
+    expect(
+      workspace.index.customKeywordsOf("w/app_b/static/references").map((k) => k.name),
+    ).toEqual(["dirty_action"]);
+    workspace.dispose();
+  });
+
+  it("неудачное сканирование не помечает корень навсегда", async () => {
+    workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
+    workspaceControl.files.set(appResources, resourcesText("retried_action"));
+    workspaceControl.files.set(appDsl, '{ "some_action": { "type": "retried_action" } }');
+    // Все сканирования Python во время старта падают: корень не должен
+    // остаться помеченным как просканированный.
+    workspaceControl.findFilesFailures = 10;
+
+    const workspace = new SmartAppWorkspace();
+    await workspace.start();
+    expect(workspace.index.customKeywordsOf("w/app_b/static/references")).toEqual([]);
+
+    // Сканирование снова работает — следующее событие обязано попробовать заново.
+    workspaceControl.findFilesFailures = 0;
+    workspaceControl.watchers[0]!.created.fire(Uri.parse(appDsl));
+    await waitFor(
+      () => workspace.index.customKeywordsOf("w/app_b/static/references").length > 0,
+    );
+    workspace.dispose();
+  });
+
   it("во время сканирования словарь не отдаётся", async () => {
     workspaceControl.files.set(appConfig, "from app.resources.custom import R\nRESOURCES = R\n");
     workspaceControl.files.set(appResources, resourcesText("scanned_action"));

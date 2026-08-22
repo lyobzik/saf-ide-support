@@ -11,7 +11,12 @@ import org.junit.Test
 class SmartAppResourceResolverTest {
 
     private fun reader(files: Map<String, String>) =
-        SmartAppResourceResolver.ModuleReader { files[it] }
+        object : SmartAppResourceResolver.AppFiles {
+            override fun read(relativePath: String): String? = files[relativePath]
+
+            override fun exists(path: String): Boolean =
+                files.keys.any { it == path || it.startsWith("$path/") }
+        }
 
     private fun keywords(files: Map<String, String>) =
         SmartAppResourceResolver.customKeywords(reader(files))
@@ -215,6 +220,23 @@ class SmartAppResourceResolverTest {
                 "app_config.py" to config,
                 "app/resources/custom_app_resources.py" to
                     "class CustomAppResources(MissingBase):\n" +
+                    """    def init_actions(self):
+        actions["custom"] = C""" + "\n",
+            ),
+        )
+        assertEquals(emptyList<Any>(), found)
+    }
+
+    @Test
+    fun missingApplicationModuleGivesNothing() {
+        // Корневой пакет `app` в приложении есть, значит модуль наш и его не
+        // хватает: это обрыв, а не библиотечная база.
+        val found = keywords(
+            mapOf(
+                "app_config.py" to config,
+                "app/resources/custom_app_resources.py" to
+                    "from app.resources.missing import BaseResources\n\n" +
+                    "class CustomAppResources(BaseResources):\n" +
                     """    def init_actions(self):
         actions["custom"] = C""" + "\n",
             ),
