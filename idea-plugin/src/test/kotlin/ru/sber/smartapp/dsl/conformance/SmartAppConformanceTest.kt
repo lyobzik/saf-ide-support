@@ -10,8 +10,10 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiPolyVariantReference
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.codeInsight.CodeInsightSettings
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import ru.sber.smartapp.dsl.SmartAppRefKind
+import ru.sber.smartapp.dsl.completion.SmartAppCompletionKind
 import ru.sber.smartapp.dsl.SmartAppScopes
 import ru.sber.smartapp.dsl.highlight.SmartAppTextAttributes
 import ru.sber.smartapp.dsl.index.SmartAppNameIndex
@@ -34,14 +36,30 @@ import java.io.File
 class SmartAppConformanceTest : BasePlatformTestCase() {
 
     private lateinit var fixtures: List<Fixture>
+    private var autocompleteSingleVariant = true
 
     override fun setUp() {
         super.setUp()
+        // Единственный подходящий вариант платформа вставляет сразу, не показывая
+        // lookup, — тогда у теста нет элементов, и вид варианта проверить нечем.
+        // Для корпуса это выключается: проверяется состав предложения, а не
+        // поведение авто-вставки (её проверяют платформенные тесты).
+        val settings = CodeInsightSettings.getInstance()
+        autocompleteSingleVariant = settings.AUTOCOMPLETE_ON_CODE_COMPLETION
+        settings.AUTOCOMPLETE_ON_CODE_COMPLETION = false
         fixtures = loadFixtures()
         for (fixture in fixtures) {
             for ((path, text) in fixture.files) {
                 myFixture.addFileToProject("${fixture.name}/$path", text)
             }
+        }
+    }
+
+    override fun tearDown() {
+        try {
+            CodeInsightSettings.getInstance().AUTOCOMPLETE_ON_CODE_COMPLETION = autocompleteSingleVariant
+        } finally {
+            super.tearDown()
         }
     }
 
@@ -194,9 +212,8 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
             val elements = myFixture.completeBasic()
 
             val expected = check.getAsJsonArray("items").map { it.asString }
-            // Единственный подходящий вариант платформа вставляет сразу, не
-            // показывая lookup: тогда `lookupElementStrings` пуст, и фактически
-            // предложенным вариантом является уже вставленный идентификатор.
+            // Авто-вставка выключена в setUp, но если платформа всё же обошлась без
+            // lookup'а, вариантом считается уже вставленный идентификатор.
             val actual = myFixture.lookupElementStrings
                 ?: elements?.map { it.lookupString }
                 ?: listOf(insertedIdentifier())
@@ -210,6 +227,8 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
                 expected.sorted(),
                 actual.filter { it in expected }.sorted(),
             )
+            checkCompletionKind(fixture, check, elements, expected)
+
             val absent = check.getAsJsonArray("absent")?.map { it.asString } ?: emptyList()
             for (variant in absent) {
                 assertFalse(
@@ -220,6 +239,29 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
             }
             restoreDocument(text)
         }
+    }
+
+    /**
+     * Вид предложенных вариантов. То же утверждение, что и в TS-раннере: без него
+     * IDEA может предложить поле там, где расширение предлагает переменную (метки
+     * совпадут, смысл — нет), и общий прогон останется зелёным.
+     */
+    private fun checkCompletionKind(
+        fixture: Fixture,
+        check: JsonObject,
+        elements: Array<com.intellij.codeInsight.lookup.LookupElement>?,
+        expected: List<String>,
+    ) {
+        val expectedKind = check.get("kind")?.asString ?: return
+        if (expected.isEmpty()) return
+        val where = "kind в '${fixture.name}' по якорю '${check["anchor"].asString}'"
+        assertNotNull("$where: вариантов нет, вид проверить нечем", elements)
+
+        val kinds = elements!!
+            .filter { it.lookupString in expected }
+            .map { SmartAppCompletionKind.of(it)?.name?.lowercase() ?: "не наш вариант" }
+            .toSet()
+        assertEquals(where, setOf(expectedKind), kinds)
     }
 
     fun testSemanticTokens() {
