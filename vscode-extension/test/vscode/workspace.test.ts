@@ -404,3 +404,17 @@ describe("жизненный цикл ресурсов приложения", ()
     workspace.dispose();
   });
 });
+
+describe("механика уборки в track()", () => {
+  // Характеризация платформы, а не нашего кода: именно эта разница объясняет,
+  // почему уборка вешается через then(cleanup, cleanup). С `finally` неожиданный
+  // отказ операции всплыл бы как unhandledRejection — в живом редакторе это
+  // видно только в логе, а тестом не воспроизводится.
+  it("finally сохраняет отказ, then(cleanup, cleanup) — нет", async () => {
+    const rejected = (): Promise<void> => Promise.reject(new Error("boom"));
+    const cleanup = (): void => undefined;
+
+    await expect(rejected().finally(cleanup)).rejects.toThrow("boom");
+    await expect(rejected().then(cleanup, cleanup)).resolves.toBeUndefined();
+  });
+});

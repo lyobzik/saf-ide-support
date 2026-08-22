@@ -194,15 +194,30 @@ export class SmartAppWorkspace implements vscode.Disposable {
     if (notify) this.onIndexed.fire();
   }
 
-  /** Запоминает начатую операцию, чтобы `start()` мог её дождаться. */
+  /**
+   * Запоминает начатую операцию, чтобы `start()` мог её дождаться.
+   *
+   * Уборка вешается через `then(cleanup, cleanup)`, а не `finally`: `finally`
+   * возвращает промис, отклоняющийся вместе с исходным, и неожиданный отказ
+   * операции всплыл бы как `unhandledRejection`. Штатные ошибки чтения и
+   * сканирования обрабатываются внутри самих операций, так что это страховка —
+   * воспроизвести её нечем, и тестом она не покрыта.
+   */
   private track(operation: Promise<void>): void {
     this.inFlight.add(operation);
-    void operation.finally(() => this.inFlight.delete(operation));
+    const cleanup = (): void => {
+      this.inFlight.delete(operation);
+    };
+    void operation.then(cleanup, cleanup);
   }
 
-  /** Ждёт, пока очередь начатых операций опустеет, включая порождённые ими. */
+  /**
+   * Ждёт, пока очередь начатых операций опустеет, включая порождённые ими.
+   * `allSettled`, а не `all`: неожиданный отказ одной операции не должен
+   * ронять активацию расширения целиком.
+   */
   private async settle(): Promise<void> {
-    while (this.inFlight.size > 0) await Promise.all([...this.inFlight]);
+    while (this.inFlight.size > 0) await Promise.allSettled([...this.inFlight]);
   }
 
   /** Возвращает файл к содержимому диска после закрытия несохранённого документа. */
