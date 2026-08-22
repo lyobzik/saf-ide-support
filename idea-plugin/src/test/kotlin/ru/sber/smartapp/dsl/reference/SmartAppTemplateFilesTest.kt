@@ -93,6 +93,27 @@ class SmartAppTemplateFilesTest : BasePlatformTestCase() {
         )
     }
 
+    fun testSymlinkedDirectoryAliasKeepsBothPaths() {
+        // `templates/alias` — ссылка на соседний `templates/common`: это два разных
+        // значения "file", и оба резолвятся. Глобальная пометка «канонический путь
+        // пройден» спрятала бы одно из них — какое именно, решал бы порядок детей.
+        File(dir, "templates/common").mkdirs()
+        File(dir, "templates/common/inner.jinja2").writeText("")
+        Files.createSymbolicLink(
+            File(dir, "templates/alias").toPath(),
+            File(dir, "templates/common").toPath(),
+        )
+        val paths = SmartAppTemplateFiles.pathsIn(root(), listOf("templates"))
+        assertTrue("путь через настоящий каталог: $paths", paths.contains("common/inner.jinja2"))
+        assertTrue("путь через алиас: $paths", paths.contains("alias/inner.jinja2"))
+        for (path in paths) {
+            assertNotNull(
+                "предложенный путь '$path' не резолвится",
+                SmartAppFileRefRules.findByPath(root(), "templates/$path"),
+            )
+        }
+    }
+
     fun testSymlinkedFileIsCollected() {
         val target = File(dir, "outside.jinja2")
         target.writeText("")

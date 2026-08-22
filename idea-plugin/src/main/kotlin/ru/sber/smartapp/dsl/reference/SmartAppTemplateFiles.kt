@@ -26,9 +26,12 @@ object SmartAppTemplateFiles {
      * Гарантий по размеру каталога ветка не даёт (осознанно: усечённый список
      * навсегда спрятал бы существующий файл от префиксного поиска), поэтому
      * обход отменяем на каждом шаге — [ProgressManager.checkCanceled].
-     * Символические ссылки следуются, как и в резолве, но каталог, чей
-     * канонический путь уже пройден, повторно не обходится: `templates/loop`,
-     * указывающий на `templates`, иначе дал бы бесконечную рекурсию.
+     * Символические ссылки следуются, как и в резолве; от бесконечной рекурсии
+     * защищает проверка предков **текущей ветки** обхода: `templates/loop`,
+     * указывающий на `templates`, дальше себя не уводит. Глобальной пометки
+     * «этот каталог уже пройден» здесь быть не может: `templates/alias` —
+     * ссылка на соседний `templates/common` — это два разных значения `file`,
+     * и оба обязаны предлагаться (в расширении оба лежат в реестре).
      */
     fun pathsIn(root: VirtualFile, dirs: List<String>): List<String> {
         val paths = LinkedHashSet<String>()
@@ -42,18 +45,28 @@ object SmartAppTemplateFiles {
         return paths.toList()
     }
 
+    /**
+     * [ancestors] — канонические пути каталогов текущей ветки рекурсии. Каталог
+     * убирается из набора при выходе: иначе алиас, ведущий на уже пройденный
+     * соседний каталог, потерял бы все свои пути.
+     */
     private fun collectInto(
         dir: VirtualFile,
         prefix: String,
         paths: MutableSet<String>,
-        visited: MutableSet<String>,
+        ancestors: MutableSet<String>,
     ) {
-        if (!visited.add(dir.canonicalPath ?: dir.path)) return
-        for (child in dir.children) {
-            ProgressManager.checkCanceled()
-            val path = if (prefix.isEmpty()) child.name else "$prefix/" + child.name
-            // Каталог целью не является: значение обязано указывать на файл.
-            if (child.isDirectory) collectInto(child, path, paths, visited) else paths.add(path)
+        val canonical = dir.canonicalPath ?: dir.path
+        if (!ancestors.add(canonical)) return
+        try {
+            for (child in dir.children) {
+                ProgressManager.checkCanceled()
+                val path = if (prefix.isEmpty()) child.name else "$prefix/" + child.name
+                // Каталог целью не является: значение обязано указывать на файл.
+                if (child.isDirectory) collectInto(child, path, paths, ancestors) else paths.add(path)
+            }
+        } finally {
+            ancestors.remove(canonical)
         }
     }
 }
