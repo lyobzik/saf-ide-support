@@ -19,6 +19,7 @@ import ru.sber.smartapp.dsl.SmartAppScopes
 import ru.sber.smartapp.dsl.highlight.SmartAppTextAttributes
 import ru.sber.smartapp.dsl.index.SmartAppNameIndex
 import ru.sber.smartapp.dsl.findusages.SmartAppCustomKeywordTargets
+import ru.sber.smartapp.dsl.resources.SmartAppCustomKeywords
 import ru.sber.smartapp.dsl.reference.SmartAppCustomKeywordReference
 import ru.sber.smartapp.dsl.reference.SmartAppFieldReference
 import ru.sber.smartapp.dsl.reference.SmartAppReference
@@ -87,6 +88,42 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
                 "фикстура '${fixture.name}' объявляет секции $unknown, " +
                     "которые conformance-раннер IDEA не проверяет",
                 unknown.isEmpty(),
+            )
+        }
+    }
+
+    /**
+     * Словарь приложения целиком: цепочка от `RESOURCES`, свёртка по `super()`
+     * и место действующей регистрации. Приложение задаётся любым его DSL-файлом
+     * — ни каретка, ни PSI для этой секции не нужны.
+     */
+    fun testCustomKeywords() {
+        forEachCheck("customKeywords") { fixture, check ->
+            val file = psiFile(fixture, check["file"].asString)
+            // Порядок задаёт обход цепочки, а не контракт: сортируем обе стороны.
+            val actual = SmartAppCustomKeywords.registrations(file)
+                .map { CustomKeywordItem(it.keyword.category, it.keyword.name, describe(fixture, it)) }
+                .sortedWith(compareBy({ it.category }, { it.name }))
+            val expected = check.getAsJsonArray("items")
+                .map { it.asJsonObject }
+                .map {
+                    CustomKeywordItem(
+                        category = it["category"].asString,
+                        name = it["name"].asString,
+                        registration = expectedDescribed(fixture, it["registration"].asJsonObject),
+                    )
+                }
+                .sortedWith(compareBy({ it.category }, { it.name }))
+
+            val aligned = actual.mapIndexed { index, item ->
+                expected.getOrNull(index)
+                    ?.let { item.copy(registration = matching(item.registration, it.registration)) }
+                    ?: item
+            }
+            assertEquals(
+                "словарь приложения '${fixture.name}' для ${check["file"].asString}",
+                expected,
+                aligned,
             )
         }
     }
@@ -667,6 +704,13 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
         val rangeText: String,
     )
 
+    /** Слово приложения вместе с местом его действующей регистрации. */
+    private data class CustomKeywordItem(
+        val category: String,
+        val name: String,
+        val registration: Described,
+    )
+
     private data class Diagnostic(val message: String, val line: Int, val rangeText: String)
 
     private class Fixture(
@@ -710,6 +754,7 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
         /** Секции `expected.json`, которые умеет проверять этот раннер. */
         val SUPPORTED_SECTIONS = setOf(
             "description",
+            "customKeywords",
             "definitions",
             "references",
             "diagnostics",

@@ -1,0 +1,8 @@
+{
+  "other": {
+    "type": "other_action"
+  },
+  "copy": {
+    "type": "custom_action"
+  }
+}

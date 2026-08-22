@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SmartAppIndex } from "../../src/core/index";
+import { applicationRootOf } from "../../src/core/files";
 import { completionAt } from "../../src/core/completion";
 import { renameEdits } from "../../src/core/rename";
 import { semanticTokens } from "../../src/core/semanticTokens";
@@ -39,6 +40,14 @@ interface TargetSpec {
 
 interface Expected {
   readonly description: string;
+  /**
+   * Словарь приложения целиком: приложение задаётся любым его DSL-файлом.
+   * Сравнение полное — лишнее слово обязано ронять кейс.
+   */
+  readonly customKeywords?: readonly {
+    file: string;
+    items: readonly { category: string; name: string; registration: TargetSpec }[];
+  }[];
   readonly definitions?: readonly {
     file: string;
     anchor: string;
@@ -206,6 +215,7 @@ const fixtures = loadFixtures();
  */
 const SUPPORTED_SECTIONS = new Set([
   "description",
+  "customKeywords",
   "definitions",
   "references",
   "diagnostics",
@@ -235,6 +245,42 @@ describe("conformance-корпус", () => {
     describe(fixture.name, () => {
       const index = buildIndex(fixture);
       const contextFor = (path: string) => documentContext(uriOf(path), textOf(fixture, path));
+
+      for (const check of fixture.expected.customKeywords ?? []) {
+        it(`customKeywords: ${check.file}`, () => {
+          const scopeRoot = contextFor(check.file).scopeRoot;
+          const appRoot = applicationRootOf(scopeRoot as string);
+          // Порядок задаёт обход цепочки, а не контракт: сортируем обе стороны.
+          const sortKey = (item: { category: string; name: string }) =>
+            `${item.category}:${item.name}`;
+          const actual = [...index.customKeywordsOf(scopeRoot)]
+            .map((keyword) => ({
+              category: keyword.category,
+              name: keyword.name,
+              registration: describeLocation(fixture, {
+                uri: index.registrationUri(appRoot, keyword.file) ?? "",
+                start: keyword.nameStart,
+                end: keyword.nameEnd,
+              }),
+            }))
+            .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+          const expectedItems = [...check.items]
+            .map((item) => ({
+              category: item.category,
+              name: item.name,
+              registration: expectedDescribed(fixture, item.registration),
+            }))
+            .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+          expect(
+            actual.map((item, position) => {
+              const expectation = expectedItems[position];
+              return expectation === undefined
+                ? item
+                : { ...item, registration: matching(item.registration, expectation.registration) };
+            }),
+          ).toEqual(expectedItems);
+        });
+      }
 
       for (const check of fixture.expected.definitions ?? []) {
         it(`definition: ${check.anchor}`, () => {
@@ -329,7 +375,12 @@ describe("conformance-корпус", () => {
       for (const check of fixture.expected.semanticTokens ?? []) {
         it(`semanticTokens: ${check.file} ${check.type}`, () => {
           const text = textOf(fixture, check.file);
-          const tokens = semanticTokens(contextFor(check.file)).filter((t) => t.type === check.type);
+          const context = contextFor(check.file);
+          // Словарь приложения передаётся так же, как это делает провайдер:
+          // без него слова, зарегистрированные приложением, не подсвечиваются.
+          const tokens = semanticTokens(context, index.customKeywordsOf(context.scopeRoot)).filter(
+            (t) => t.type === check.type,
+          );
           expect(tokens.map((t) => text.slice(t.start, t.end))).toEqual(check.texts);
           expect(tokens.map((t) => lineOf(text, t.start))).toEqual(check.lines);
         });

@@ -1,5 +1,5 @@
 {
-  "greet": {
+  "vendored": {
     "type": "custom_action"
   }
 }

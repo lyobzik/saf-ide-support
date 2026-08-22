@@ -1,33 +1,144 @@
 {
-  "description": "Ключевое слово, зарегистрированное приложением: переход со значения type на строку регистрации в Python и вхождения по всему приложению",
+  "description": "Ключевые слова, зарегистрированные приложением: цепочка классов от RESOURCES, переход к строке регистрации, вхождения по приложению и изоляция соседнего и вложенного приложений",
+  "customKeywords": [
+    {
+      "file": "app_a/static/references/actions/actions.json",
+      "items": [
+        {
+          "category": "action",
+          "name": "base_action",
+          "registration": {
+            "file": "app_a/app/resources/base_resources.py",
+            "line": 7,
+            "column": 17,
+            "rangeText": "base_action"
+          }
+        },
+        {
+          "category": "action",
+          "name": "custom_action",
+          "registration": {
+            "file": "app_a/app/resources/custom_app_resources.py",
+            "line": 8,
+            "column": 17,
+            "rangeText": "custom_action"
+          }
+        },
+        {
+          "category": "action",
+          "name": "shared",
+          "registration": {
+            "file": "app_a/app/resources/custom_app_resources.py",
+            "line": 9,
+            "column": 17,
+            "rangeText": "shared"
+          }
+        },
+        {
+          "category": "requirement",
+          "name": "custom_requirement",
+          "registration": {
+            "file": "app_a/app/resources/custom_app_resources.py",
+            "line": 12,
+            "column": 22,
+            "rangeText": "custom_requirement"
+          }
+        }
+      ]
+    },
+    {
+      "file": "app_a/subapp/static/references/actions/actions.json",
+      "items": [
+        {
+          "category": "action",
+          "name": "nested_action",
+          "registration": {
+            "file": "app_a/subapp/app/resources/custom_app_resources.py",
+            "line": 5,
+            "column": 17,
+            "rangeText": "nested_action"
+          }
+        }
+      ]
+    },
+    {
+      "file": "app_b/static/references/actions/actions.json",
+      "items": [
+        {
+          "category": "action",
+          "name": "other_action",
+          "registration": {
+            "file": "app_b/app/resources/custom_app_resources.py",
+            "line": 5,
+            "column": 17,
+            "rangeText": "other_action"
+          }
+        }
+      ]
+    }
+  ],
   "definitions": [
     {
-      "file": "static/references/actions/actions.json",
-      "anchor": "custom_action",
+      "file": "app_a/static/references/actions/actions.json",
+      "anchor": "\"custom_action\"",
+      "anchorOffset": 2,
       "targets": [
         {
-          "file": "app/resources/custom_app_resources.py",
+          "file": "app_a/app/resources/custom_app_resources.py",
           "line": 8,
           "column": 17,
           "rangeText": "custom_action"
         }
       ]
+    },
+    {
+      "file": "app_a/static/references/actions/actions.json",
+      "anchor": "\"base_action\"",
+      "anchorOffset": 2,
+      "targets": [
+        {
+          "file": "app_a/app/resources/base_resources.py",
+          "line": 7,
+          "column": 17,
+          "rangeText": "base_action"
+        }
+      ]
+    },
+    {
+      "file": "app_a/static/references/actions/actions.json",
+      "anchor": "\"shared\"",
+      "anchorOffset": 2,
+      "targets": [
+        {
+          "file": "app_a/app/resources/custom_app_resources.py",
+          "line": 9,
+          "column": 17,
+          "rangeText": "shared"
+        }
+      ]
+    },
+    {
+      "file": "app_a/subapp/static/references/actions/actions.json",
+      "anchor": "\"custom_action\"",
+      "anchorOffset": 2,
+      "targets": []
     }
   ],
   "references": [
     {
-      "file": "static/references/actions/actions.json",
-      "anchor": "custom_action",
+      "file": "app_a/static/references/actions/actions.json",
+      "anchor": "\"custom_action\"",
+      "anchorOffset": 2,
       "includeDeclaration": false,
       "targets": [
         {
-          "file": "static/references/actions/actions.json",
+          "file": "app_a/static/references/actions/actions.json",
           "line": 2,
           "column": 13,
           "rangeText": "custom_action"
         },
         {
-          "file": "static/references/scenarios/main.json",
+          "file": "app_a/static/references/scenarios/main.json",
           "line": 4,
           "column": 17,
           "rangeText": "custom_action"
@@ -35,28 +146,89 @@
       ]
     },
     {
-      "file": "static/references/actions/actions.json",
-      "anchor": "custom_action",
+      "file": "app_a/static/references/actions/actions.json",
+      "anchor": "\"custom_action\"",
+      "anchorOffset": 2,
       "includeDeclaration": true,
       "targets": [
         {
-          "file": "static/references/actions/actions.json",
+          "file": "app_a/static/references/actions/actions.json",
           "line": 2,
           "column": 13,
           "rangeText": "custom_action"
         },
         {
-          "file": "static/references/scenarios/main.json",
+          "file": "app_a/static/references/scenarios/main.json",
           "line": 4,
           "column": 17,
           "rangeText": "custom_action"
         },
         {
-          "file": "app/resources/custom_app_resources.py",
+          "file": "app_a/app/resources/custom_app_resources.py",
           "line": 8,
           "column": 17,
           "rangeText": "custom_action"
         }
+      ]
+    }
+  ],
+  "completion": [
+    {
+      "file": "app_a/static/references/actions/draft.json",
+      "anchor": "\"type\": \"\"",
+      "anchorOffset": 9,
+      "kind": "keyword",
+      "items": [
+        "base_action",
+        "custom_action",
+        "shared"
+      ],
+      "absent": [
+        "custom_requirement",
+        "base_requirement",
+        "unused_action",
+        "nested_action",
+        "other_action"
+      ]
+    },
+    {
+      "file": "app_b/static/references/actions/draft.json",
+      "anchor": "\"type\": \"\"",
+      "anchorOffset": 9,
+      "kind": "keyword",
+      "items": [
+        "other_action"
+      ],
+      "absent": [
+        "custom_action",
+        "base_action",
+        "shared"
+      ]
+    }
+  ],
+  "semanticTokens": [
+    {
+      "file": "app_a/static/references/actions/actions.json",
+      "type": "smartappKeyword",
+      "texts": [
+        "\"custom_action\"",
+        "\"base_action\"",
+        "\"shared\""
+      ],
+      "lines": [
+        2,
+        5,
+        8
+      ]
+    },
+    {
+      "file": "app_b/static/references/actions/actions.json",
+      "type": "smartappKeyword",
+      "texts": [
+        "\"other_action\""
+      ],
+      "lines": [
+        2
       ]
     }
   ]

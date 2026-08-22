@@ -1,0 +1,8 @@
+{
+  "nested": {
+    "type": "nested_action"
+  },
+  "copy": {
+    "type": "custom_action"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "greet": {
+    "type": "custom_action"
+  },
+  "legacy": {
+    "type": "base_action"
+  },
+  "both": {
+    "type": "shared"
+  }
+}
