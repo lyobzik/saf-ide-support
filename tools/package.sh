@@ -22,7 +22,11 @@ if [ -z "${JAVA_HOME:-}" ] && ! command -v java >/dev/null 2>&1; then
 fi
 
 echo "==> idea-plugin"
-./gradlew :idea-plugin:packagePlugin "$@"
+# На машине разработчика платформа берётся из установленной IDE (умолчание
+# gradle.properties), в CI и на любой машине без неё — из maven: без этого
+# скрипт уходит в `ideSource=local` и падает на несуществующем пути к IDE.
+# shellcheck disable=SC2086
+./gradlew ${GRADLE_ARGS:-} :idea-plugin:packagePlugin "$@"
 
 echo "==> vscode-extension"
 if [ ! -d vscode-extension/node_modules ]; then

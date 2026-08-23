@@ -8,6 +8,7 @@ dist/
 .idea/
 out/
 node_modules/
+__pycache__/
 vscode-extension/out/
 *.vsix
 vscode-extension/.vscode-test/

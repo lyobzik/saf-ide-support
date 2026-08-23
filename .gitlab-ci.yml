@@ -1,123 +1,142 @@
-# CI монорепозитория SmartApp DSL.
+# CI/CD монорепозитория SmartApp DSL — основной хостинг.
 #
-# Две реализации (плагин IDEA и расширение VS Code) держатся вместе двумя
-# контрактами: данными (`shared/rules`, `shared/keywords`) и поведением
-# (`shared/fixtures`). Стадия `contract` проверяет первый, стадия `test` — второй,
-# прогоняя один и тот же корпус на обеих сторонах.
+# Здесь нет ни одной команды сборки или проверки: всё, что делает пайплайн,
+# живёт в `tools/ci/` и потому одинаково выполняется на GitLab, на GitHub и на
+# машине разработчика. YAML отвечает только за то, *когда* запускать, в каком
+# образе, что сохранять и как публиковать.
+#
+# Роли скриптов:
+#   tools/ci/run.sh            — переносимые шаги (оба хостинга, локально)
+#   tools/ci/deps-debian.sh    — системные пакеты голого Debian-образа
+#   tools/ci/publish_gitlab.py — реестр пакетов и Release (только GitLab)
 #
 # Обязательность пайплайна включается в настройках проекта
-# (Settings → Merge requests → «Pipelines must succeed» плюс защита ветки master),
-# а не в этом файле.
+# (Settings → Merge requests → «Pipelines must succeed» плюс защита master и
+# protected tags `v*`), а не в этом файле.
 
 stages:
   - contract
   - test
   - package
+  - release
 
 variables:
   GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
   GRADLE_OPTS: "-Dorg.gradle.daemon=false"
-  # Локальной IDE на runner'е нет: платформа берётся из maven-репозиториев.
-  GRADLE_ARGS: "-PideSource=maven"
+
+# Ветка без MR пайплайна не создаёт: обратная связь до MR берётся локальным
+# прогоном тех же шагов, а не минутами тарифа. Нерелизный тег (`sandbox`) тоже
+# не создаёт — обещать по нему нечего, а ветка под ним уже проверена.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"'
+      when: never
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
 
 default:
   interruptible: true
+  retry:
+    max: 1
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
 
-.gradle:
-  image: eclipse-temurin:21-jdk
-  cache:
-    key: gradle
-    paths:
-      - .gradle/caches
-      - .gradle/wrapper
+# Образы пинятся по digest: тег движется, и «тот же самый» пайплайн через месяц
+# собирался бы в другом окружении.
+.python:
+  image: python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
 
-# Артефакты собираются автоматически по релизному тегу и по кнопке — на
-# остальных ветках. Гонять упаковку на каждый MR незачем: тесты и контракты и
-# так прогоняются, а zip с vsix нужны только когда их кто-то собирается забрать.
-#
-# Релизный тег — `v<version>`; что он совпадает с версией в манифестах,
-# проверяет contract:version до стадии package. Тег другого вида упаковку не
-# запускает вовсе — ни автоматически, ни кнопкой: пусть лучше не будет
-# артефактов, чем появятся артефакты, чья версия противоречит имени тега.
-# Ручная упаковка остаётся там, где тега нет и обещать он ничего не может, —
-# на ветках.
-.release:
+.node:
+  image: node:22-bookworm@sha256:0557ac14e0d45d02ed563067b82856ca5e7aa3437fa28d98d4350ea9c3d9494a
+
+.jdk:
+  image: eclipse-temurin:21-jdk@sha256:85f00967bcc624fc19fa9c2cf124ea426a5363898e267141726f31f358c2e14b
+
+# Всё, кроме релизного тега.
+.not-tag:
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-    - if: $CI_COMMIT_TAG
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - when: on_success
+
+# Упаковка вручную там, где тега нет: артефакты нужны, только когда их кто-то
+# собирается забрать, а платить за них минутами каждого MR незачем.
+.manual-package:
+  rules:
+    - if: '$CI_COMMIT_TAG'
       when: never
     - when: manual
       allow_failure: true
 
-.node:
-  image: node:22-bookworm
-  cache:
-    key:
-      files:
-        - vscode-extension/package-lock.json
-    paths:
-      - vscode-extension/node_modules
-  before_script:
-    - cd vscode-extension
-    - npm ci
-
 # --- contract ---------------------------------------------------------------
-
-contract:rules:
-  extends: .gradle
-  stage: contract
-  script:
-    # Снимок контракта обязан совпадать с Kotlin-таблицами, из которых он растёт.
-    - ./gradlew $GRADLE_ARGS :idea-plugin:exportRules --check
+#
+# Стадия дешёвая целиком: ни одному job'у не нужна платформа IntelliJ, поэтому
+# она успевает отсечь ошибку до того, как стартует тяжёлая стадия test.
+# Снимок `rules.json` проверяется не здесь, а внутри test:idea — его проверка
+# компилирует исходники плагина и потому тянет платформу.
 
 contract:keywords:
-  image: python:3.12-slim
+  extends: .python
   stage: contract
   script:
-    # Словарь обязан соответствовать vendored-исходнику фреймворка.
-    - python tools/generate_keywords.py --check
+    - tools/ci/run.sh contract:keywords
 
 contract:version:
-  # Скрипту нужен только sh; образ тот же, что у contract:keywords, чтобы не
-  # тянуть на runner лишний слой ради двух строк sed.
-  image: python:3.12-slim
+  extends: .python
   stage: contract
   script:
-    # Номер версии живёт в двух манифестах и в имени тега: разошлись — и
-    # непонятно, какие zip и vsix составляют одну пару и что вообще за релиз.
-    - sh tools/check-version.sh "$CI_COMMIT_TAG"
+    - tools/ci/run.sh contract:version "$CI_COMMIT_TAG"
 
 contract:schema:
   extends: .node
   stage: contract
   script:
-    # Единственная schema-проверка в проекте: оба общих артефакта плюс версия.
-    - npm run verify:contract
+    - tools/ci/run.sh contract:schema
+
+contract:publish:
+  extends: .python
+  stage: contract
+  script:
+    - tools/ci/run.sh test:publish
 
 # --- test -------------------------------------------------------------------
 
-test:idea:
-  extends: .gradle
+.idea:
+  extends: .jdk
   stage: test
-  script:
-    - ./gradlew $GRADLE_ARGS -Djava.awt.headless=true :idea-plugin:test
   artifacts:
     when: always
     reports:
       junit: idea-plugin/build/test-results/test/TEST-*.xml
+    paths:
+      - idea-plugin/build/reports/pluginVerifier/
     expire_in: 1 week
 
-test:idea:verify:
-  extends: .gradle
-  stage: test
+test:idea:
+  extends:
+    - .idea
+    - .not-tag
   script:
-    # Верификатор JetBrains ловит то, чего не видят тесты: невалидный дескриптор
-    # и несовместимость с версиями платформы. Без этой job'ы регрессия в
-    # plugin.xml дойдёт до master.
-    - ./gradlew $GRADLE_ARGS -Djava.awt.headless=true :idea-plugin:verifyPlugin
+    - tools/ci/run.sh test:idea
+
+# На релизном теге артефакт плагина собирается в том же job'е, где уже скачана
+# платформа: отдельный package:idea означал бы вторую загрузку дистрибутива IDE
+# ради одного zip.
+test:idea:release:
+  extends: .idea
+  rules:
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - tools/ci/run.sh test:idea package:idea
   artifacts:
-    when: on_failure
+    when: always
+    reports:
+      junit: idea-plugin/build/test-results/test/TEST-*.xml
     paths:
+      - dist/*.zip
       - idea-plugin/build/reports/pluginVerifier/
     expire_in: 1 week
 
@@ -125,49 +144,102 @@ test:vscode:unit:
   extends: .node
   stage: test
   script:
-    # Типы: vitest их не проверяет, esbuild тоже — без этого шага ошибка типа
-    # доезжает до пользователя, а тест с ней остаётся зелёным.
-    - npm run typecheck
-    # Ядро, адаптер (на фейковом vscode) и conformance-корпус.
-    - npm run test:unit
+    - tools/ci/run.sh test:vscode
+  artifacts:
+    when: always
+    reports:
+      junit: vscode-extension/build/test-results/vitest.xml
+    expire_in: 1 week
 
 test:vscode:integration:
   extends: .node
   stage: test
-  before_script:
-    - apt-get update
-    - >-
-      apt-get install -y --no-install-recommends
-      xvfb libnss3 libgbm1 libasound2 libgtk-3-0 libx11-xcb1 libxss1 libsecret-1-0
-    - cd vscode-extension
-    - npm ci
   script:
-    # Настоящий VS Code: регистрация провайдеров и активация расширения.
-    - xvfb-run -a npm run test:integration
+    - tools/ci/deps-debian.sh
+    - tools/ci/run.sh test:vscode:int
 
 # --- package ----------------------------------------------------------------
 
 package:idea:
   extends:
-    - .gradle
-    - .release
+    - .jdk
+    - .manual-package
   stage: package
   script:
-    - ./gradlew $GRADLE_ARGS :idea-plugin:packagePlugin
+    - tools/ci/run.sh package:idea
   artifacts:
     paths:
       - dist/*.zip
     expire_in: 1 month
 
 package:vscode:
-  extends:
-    - .node
-    - .release
+  extends: .node
   stage: package
+  # На теге — автоматически: от этого job'а зависит release, и он не должен
+  # ждать кнопки. Без тега — вручную, как и упаковка плагина.
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: on_success
+    - when: manual
+      allow_failure: true
   script:
-    # Состав .vsix проверяет сам scripts/package.mjs.
-    - npm run package
+    - tools/ci/run.sh package:vscode
   artifacts:
     paths:
       - dist/*.vsix
     expire_in: 1 month
+
+# --- release ----------------------------------------------------------------
+
+release:
+  extends: .python
+  stage: release
+  rules:
+    - if: '$CI_COMMIT_TAG'
+  # Публикация идёт строго по одной на проект и не прерывается: auto-cancel
+  # между загрузкой первого пакета и созданием Release оставил бы половину
+  # состояния.
+  resource_group: release
+  interruptible: false
+  needs:
+    - job: test:idea:release
+      artifacts: true
+    - job: package:vscode
+      artifacts: true
+  # Скрипт откажется публиковать, если не докажет по API, что тег защищён.
+  # Сигнала из окружения для этого не существует: переменные вручную
+  # запущенного пайплайна перекрывают предопределённые. Поэтому список
+  # защищённых тегов читается токеном проекта из защищённой переменной
+  # SMARTAPP_API_TOKEN (read_api); без неё релиза не будет.
+  #
+  # `environment` объявлен ради области видимости этой переменной: у токена
+  # scope `release`, поэтому он приходит только сюда. Со scope `*` его читал бы
+  # любой job пайплайна — включая тесты, которые исполняют чужой код (зависимости
+  # npm и плагины Gradle).
+  environment:
+    name: release
+  script:
+    - tools/ci/publish_gitlab.py "$CI_COMMIT_TAG"
+
+# Ручная проверка публикации против настоящего API: фейковый транспорт в
+# contract:publish проверяет алгоритм, но не GitLab. Гоняется перед первым
+# релизом и после каждой правки publish_gitlab.py. Не гейт: результат читает
+# тот, кто нажал кнопку.
+release:smoke:
+  extends: .python
+  stage: release
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - if: '$CI_MERGE_REQUEST_IID'
+      when: never
+    - when: manual
+      allow_failure: true
+  resource_group: release
+  interruptible: false
+  # Тот же токен и та же причина ограничить его область, что у release.
+  environment:
+    name: release
+  needs: []
+  script:
+    - tools/ci/publish_gitlab.py --smoke
