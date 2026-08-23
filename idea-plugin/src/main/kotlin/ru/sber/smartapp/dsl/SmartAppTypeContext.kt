@@ -31,16 +31,31 @@ object SmartAppTypeContext {
     fun categoryFor(typeProperty: JsonProperty, fileKind: SmartAppRefKind?): String? {
         val owner = typeProperty.parent as? JsonObject ?: return fileKindCategory(fileKind)
         val keys = enclosingKeys(owner)
-        val insideFields = FieldAccessSpec.fieldsProperty in keys
+        val fieldsIndex = keys.indexOf(FieldAccessSpec.fieldsProperty)
 
-        for (key in keys) {
+        for ((index, key) in keys.withIndex()) {
             if (key in ACTION_KEYS) return TypeContextSpec.actionCategory
-            if (insideFields) {
+            if (belongsToFieldItself(keys, index, fieldsIndex)) {
                 TypeContextSpec.insideFieldsCategories[key]?.let { return it }
             }
             TypeContextSpec.keyCategories[key]?.let { return it }
         }
         return fileKindCategory(fileKind)
+    }
+
+    /**
+     * Ключ описывает **само поле**, а не действие внутри него.
+     *
+     * `fields.<f>.requirement` — требование поля (`field_requirement`), а
+     * `fields.<f>.on_filled_actions[].requirement` — требование действия, и
+     * словарь у него общий (`requirement`). Различает их action-контейнер между
+     * ключом и `fields`: если он есть, переопределение «внутри fields» не
+     * применяется. Иначе `"type": "template"` в форме оказывался бы
+     * неизвестным словом — при том, что эталонное приложение пишет его именно там.
+     */
+    private fun belongsToFieldItself(keys: List<String>, index: Int, fieldsIndex: Int): Boolean {
+        if (fieldsIndex < 0) return false
+        return (index + 1 until fieldsIndex).none { keys[it] in ACTION_KEYS }
     }
 
     /** Категория по виду файла, когда структурный контекст не распознан. */

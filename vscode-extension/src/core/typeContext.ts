@@ -15,11 +15,11 @@ export function categoryFor(typeProperty: Node, fileKind: RefKind | undefined): 
   if (owner?.type !== "object") return fileKindCategory(fileKind);
 
   const keys = enclosingKeys(owner);
-  const insideFields = keys.includes(fieldAccess.fieldsProperty);
+  const fieldsIndex = keys.indexOf(fieldAccess.fieldsProperty);
 
-  for (const key of keys) {
+  for (const [index, key] of keys.entries()) {
     if (typeContext.actionKeys.has(key)) return typeContext.actionCategory;
-    if (insideFields) {
+    if (belongsToFieldItself(keys, index, fieldsIndex)) {
       const overridden = typeContext.insideFieldsCategories.get(key);
       if (overridden !== undefined) return overridden;
     }
@@ -27,6 +27,23 @@ export function categoryFor(typeProperty: Node, fileKind: RefKind | undefined): 
     if (category !== undefined) return category;
   }
   return fileKindCategory(fileKind);
+}
+
+/**
+ * Ключ описывает **само поле**, а не действие внутри него.
+ *
+ * `fields.<f>.requirement` — требование поля (`field_requirement`), а
+ * `fields.<f>.on_filled_actions[].requirement` — требование действия, и словарь
+ * у него общий (`requirement`). Различает их action-контейнер между ключом и
+ * `fields`: если он есть, переопределение «внутри fields» не применяется.
+ */
+function belongsToFieldItself(
+  keys: readonly string[],
+  index: number,
+  fieldsIndex: number,
+): boolean {
+  if (fieldsIndex < 0) return false;
+  return keys.slice(index + 1, fieldsIndex).every((key) => !typeContext.actionKeys.has(key));
 }
 
 /** Категория по виду файла, когда структурный контекст не распознан. */

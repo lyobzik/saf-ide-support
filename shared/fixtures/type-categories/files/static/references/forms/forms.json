@@ -6,7 +6,15 @@
         "type": "question",
         "requirement": {
           "type": "value_in_set"
-        }
+        },
+        "on_filled_actions": [
+          {
+            "type": "external",
+            "requirement": {
+              "type": "template"
+            }
+          }
+        ]
       }
     }
   }

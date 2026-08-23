@@ -1,5 +1,5 @@
 {
-  "description": "Категория ключевых слов type определяется контекстом, а не видом файла",
+  "description": "Категория ключевых слов type определяется контекстом, а не видом файла: требование поля и требование действия внутри поля берут разные словари",
   "completion": [
     {
       "file": "static/references/forms/forms.json",
@@ -26,7 +26,8 @@
       ],
       "absent": [
         "form_filling",
-        "app_type"
+        "app_type",
+        "template"
       ]
     },
     {
@@ -53,6 +54,19 @@
       "absent": [
         "question"
       ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"type\": \"template\"",
+      "anchorOffset": 9,
+      "kind": "keyword",
+      "items": [
+        "template"
+      ],
+      "absent": [
+        "value_in_set",
+        "question"
+      ]
     }
   ],
   "semanticTokens": [
@@ -75,11 +89,15 @@
       "type": "smartappKeyword",
       "texts": [
         "\"question\"",
-        "\"value_in_set\""
+        "\"value_in_set\"",
+        "\"external\"",
+        "\"template\""
       ],
       "lines": [
         5,
-        7
+        7,
+        11,
+        13
       ]
     }
   ]

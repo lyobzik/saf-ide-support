@@ -92,7 +92,7 @@ tools/              # генератор словаря
 | `resources/colorSchemes/SmartApp{Default,Darcula}.xml` | Цвета по умолчанию (`additionalTextAttributes`): без них подсветка Jinja не видна |
 | `highlight/SmartAppColorSettingsPage` | Страница «SmartApp DSL» в Settings → Color Scheme |
 | `annotator/SmartAppAnnotator` | `DumbAware`-аннотатор: подсветка по PSI (включая токены Jinja) + WARNING на битых ссылках и неразрешённых полях форм (ветки с индексом под dumb-guard) |
-| `SmartAppTypeContext` | Категория ключевых слов `type` по PSI-контексту (общая для completion и подсветки); `fields`→`field_description`, action-контейнеры→`action`, `requirement` внутри `fields`→`field_requirement` |
+| `SmartAppTypeContext` | Категория ключевых слов `type` по PSI-контексту (общая для completion и подсветки); `fields`→`field_description`, action-контейнеры→`action`, `requirement` **самого поля** внутри `fields`→`field_requirement`, но требование действия внутри поля (`fields.<f>.on_filled_actions[].requirement`) — обычный `requirement` |
 | `SmartAppScopes` | Область поиска для резолва/completion — каталог `references` исходного файла (изоляция наборов `static/references`) |
 | `index/SmartAppDefinitionIndex` | `FileBasedIndexExtension` с составным ключом `"<KIND>:<name>"`, value = список offset'ов (сохраняет дубликаты ключей через PSI `getPropertyList()`) |
 | `index/SmartAppNameIndex` | `FileBasedIndexExtension` с ключом = вид сущности, value = имена определений файла; для автодополнения имён без `getAllKeys`-скана |
@@ -402,6 +402,14 @@ docs/plans/, docs/insights/, arch/, mds/           # материалы для A
   для подсветки и автодополнения значений `type`: категория определяется
   подъёмом по PSI, action-контейнеры (`actions`, `on_filled_actions`,
   `success_action`…) дают `action` раньше, чем `fields`.
+- **Переопределение «внутри `fields`» действует только на само поле.** У
+  фреймворка два разных реестра: `field_requirements` наполняет требования поля
+  (`fields.<f>.requirement`), а `requirements` — требования действий, в том
+  числе действий внутри описания поля
+  (`fields.<f>.on_filled_actions[].requirement`). Различает их action-контейнер
+  **между** ключом и `fields`: есть — переопределение не применяется. Без этого
+  `"type": "template"` в форме считался бы неизвестным словом, хотя эталонное
+  приложение пишет его именно там.
 - **Изоляция наборов** (`SmartAppScopes`) — резолв/completion ограничены
   каталогом `references` исходного файла, чтобы в монорепо ссылки не утекали в
   чужой `static/references`.
