@@ -12,6 +12,19 @@ IntelliJ-платформы (`idea-plugin/`) и расширение для VS C
 `classifiers/`). Плагин понимает их семантику и помогает с навигацией и
 редактированием.
 
+## Содержание
+
+- [Возможности](#возможности)
+- [Установка](#установка)
+- [Сборка из исходников](#сборка-из-исходников)
+- [Как это работает](#как-это-работает)
+- [Монорепозиторий: две реализации и общий контракт](#монорепозиторий-две-реализации-и-общий-контракт)
+- [CI/CD: два хостинга, один набор проверок](#cicd-два-хостинга-один-набор-проверок)
+- [Технологический стек](#технологический-стек)
+- [Словарь ключевых слов](#словарь-ключевых-слов)
+- [Структура проекта](#структура-проекта)
+- [Документация для разработчиков](#документация-для-разработчиков)
+
 ## Возможности
 
 - **Подсветка** ключевых слов (значения поля `type`) и структурных ключей.
@@ -36,7 +49,101 @@ IntelliJ-платформы (`idea-plugin/`) и расширение для VS C
 любой IDE на платформе IntelliJ, где есть бандл-плагин JSON (IDEA
 Community/Ultimate, PyCharm, GIGA IDE и др.); расширение — в VS Code 1.90+.
 
-## Поля форм в Jinja-значениях
+## Установка
+
+Ни плагин, ни расширение пока не публикуются в Marketplace — обе стороны
+ставятся из файла:
+
+```text
+smartapp-dsl-<версия>.zip     # плагин для IntelliJ-платформы
+smartapp-dsl-<версия>.vsix    # расширение для VS Code
+```
+
+Собирать необязательно: готовые артефакты лежат в разделе релизов репозитория
+(ссылки ведут в реестр пакетов и не протухают, в отличие от артефактов джоб).
+Как они туда попадают — в разделе [CI/CD](#cicd-два-хостинга-один-набор-проверок);
+коротко: по тегу вида `v<версия>` сборка идёт автоматически, на ветках — по
+кнопке, а версия в теге обязана совпадать с версией в манифестах.
+
+Сборка из исходников нужна, только если хочется поставить версию, которой ещё
+нет в релизах, — тогда `tools/package.sh` кладёт оба файла в `dist/`; о том, что
+внутри, — в разделе [Сборка из исходников](#сборка-из-исходников).
+
+### Плагин для IDE на IntelliJ-платформе
+
+1. **Settings/Preferences → Plugins**.
+2. Иконка шестерёнки ⚙ → **Install Plugin from Disk…**.
+3. Выберите ZIP-файл.
+4. Перезапустите IDE по запросу.
+
+### Расширение для VS Code
+
+```bash
+code --install-extension dist/smartapp-dsl-<версия>.vsix
+```
+
+Либо **Extensions → … → Install from VSIX…**.
+
+После перезапуска откройте проект, содержащий каталог `static/references/…`, —
+подсветка, переход к определению, поиск использований и автодополнение заработают
+в JSON-файлах внутри этого каталога.
+
+> Минимальная версия платформы: build **251** (IDEA 2025.1) и новее.
+
+## Сборка из исходников
+
+### Плагин для IntelliJ-платформы
+
+> **Важно:** в системе может не быть отдельного JDK. Перед любой `gradle`-командой
+> экспортируйте `JAVA_HOME` на JBR из локальной IDE:
+>
+> ```bash
+> export JAVA_HOME="/Applications/GIGA IDE CE 2025.1.app/Contents/jbr/Contents/Home"
+> ```
+
+| Действие | Команда |
+|---|---|
+| Компиляция | `./gradlew :idea-plugin:compileKotlin` |
+| Тесты | `./gradlew :idea-plugin:test` |
+| Сборка ZIP-плагина | `./gradlew :idea-plugin:buildPlugin` → `idea-plugin/build/distributions/smartapp-dsl-<версия>.zip` |
+| Упаковка плагина в `dist/` | `./gradlew :idea-plugin:packagePlugin` → `dist/smartapp-dsl-<версия>.zip` |
+| Запуск sandbox-IDE | `./gradlew :idea-plugin:runIde` |
+| Проверка совместимости | `./gradlew :idea-plugin:verifyPlugin` |
+| Экспорт контракта данных | `./gradlew :idea-plugin:exportRules` |
+| Любой шаг CI локально | `tools/ci/run.sh <шаг>…` (список шагов — в самом файле) |
+
+По умолчанию плагин компилируется и запускается против **локальной** IDE на
+платформе IntelliJ: путь задаётся параметром `localIdePath` в `gradle.properties`
+(по умолчанию — GIGA IDE) и переопределяется флагом:
+
+```bash
+./gradlew :idea-plugin:buildPlugin -PlocalIdePath="/path/to/IDE.app"
+```
+
+Там, где локальной IDE нет (CI, чужая машина), источник платформы переключается
+на maven-репозитории:
+
+```bash
+./gradlew :idea-plugin:test -PideSource=maven -PplatformVersion=2025.1
+```
+
+### Расширение для VS Code
+
+```bash
+npm --prefix vscode-extension install
+npm --prefix vscode-extension test          # контракты + ядро + адаптер + корпус
+npm --prefix vscode-extension run compile   # бандл out/extension.js
+npm --prefix vscode-extension run package   # dist/smartapp-dsl-<версия>.vsix
+```
+
+Установка и разработка описаны в [vscode-extension/README.md](vscode-extension/README.md).
+
+## Как это работает
+
+Разделы ниже нужны, только если интересно, по каким правилам работает
+семантика: для установки и обычного использования их читать не обязательно.
+
+### Поля форм в Jinja-значениях
 
 Строковые значения DSL часто содержат Jinja2-шаблоны. Внутри выражений Jinja —
 и в интерполяциях `{{ … }}`, и в statement-тегах `{% … %}` — плагин понимает
@@ -70,7 +177,7 @@ Community/Ultimate, PyCharm, GIGA IDE и др.); расширение — в VS 
 (содержат `.`, `:`, `-`), в автодополнении не предлагаются. Jinja работает и в
 строковых элементах JSON-массивов, не только в значениях свойств.
 
-## Шаблоны в отдельных файлах
+### Шаблоны в отдельных файлах
 
 Значение `"file"` в объекте `"type": "unified_template"` называет файл шаблона:
 
@@ -93,7 +200,7 @@ Community/Ultimate, PyCharm, GIGA IDE и др.); расширение — в VS 
 VS Code — любое расширение для Jinja, в IDE на платформе IntelliJ — плагин с
 поддержкой Jinja2). Переход в файл при этом работает независимо от них.
 
-## Ключевые слова, зарегистрированные приложением
+### Ключевые слова, зарегистрированные приложением
 
 Словарь `type` — не только свойство фреймворка: навык добавляет свои действия,
 требования и филлеры сам. Делается это в подклассе `SmartAppResources`, а
@@ -227,93 +334,9 @@ variable», а **область видимости — `release`, а не `*`**:
 отказывает, но второго состояния не создаёт. Проект приватный, поэтому файлы
 релиза доступны участникам проекта, а не анонимно.
 
-## Установка
-
-Ни плагин, ни расширение пока не публикуются в Marketplace — обе стороны
-ставятся из файла. Оба артефакта собираются одной командой в каталог `dist/`:
-
-```bash
-tools/package.sh
-```
-
-```text
-dist/smartapp-dsl-<версия>.zip     # плагин для IntelliJ-платформы
-dist/smartapp-dsl-<версия>.vsix    # расширение для VS Code
-```
-
-Готовые артефакты можно взять из раздела релизов репозитория (там ссылки на
-реестр пакетов, они не протухают) или из артефактов джоб упаковки: по тегу вида
-`v<версия>` сборка идёт автоматически, на ветках — по кнопке. Версия в теге
-обязана совпадать с версией в манифестах, иначе пайплайн падает до упаковки; тег
-другого вида пайплайна не создаёт вовсе.
-
-### Плагин для IDE на IntelliJ-платформе
-
-1. **Settings/Preferences → Plugins**.
-2. Иконка шестерёнки ⚙ → **Install Plugin from Disk…**.
-3. Выберите ZIP-файл.
-4. Перезапустите IDE по запросу.
-
-### Расширение для VS Code
-
-```bash
-code --install-extension dist/smartapp-dsl-<версия>.vsix
-```
-
-Либо **Extensions → … → Install from VSIX…**.
-
-После перезапуска откройте проект, содержащий каталог `static/references/…`, —
-подсветка, переход к определению, поиск использований и автодополнение заработают
-в JSON-файлах внутри этого каталога.
-
-> Минимальная версия платформы: build **251** (IDEA 2025.1) и новее.
-
-## Сборка из исходников
-
-> **Важно:** в системе может не быть отдельного JDK. Перед любой `gradle`-командой
-> экспортируйте `JAVA_HOME` на JBR из локальной IDE:
->
-> ```bash
-> export JAVA_HOME="/Applications/GIGA IDE CE 2025.1.app/Contents/jbr/Contents/Home"
-> ```
-
-| Действие | Команда |
-|---|---|
-| Компиляция | `./gradlew :idea-plugin:compileKotlin` |
-| Тесты | `./gradlew :idea-plugin:test` |
-| Сборка ZIP-плагина | `./gradlew :idea-plugin:buildPlugin` → `idea-plugin/build/distributions/smartapp-dsl-<версия>.zip` |
-| Упаковка плагина в `dist/` | `./gradlew :idea-plugin:packagePlugin` → `dist/smartapp-dsl-<версия>.zip` |
-| Запуск sandbox-IDE | `./gradlew :idea-plugin:runIde` |
-| Проверка совместимости | `./gradlew :idea-plugin:verifyPlugin` |
-| Экспорт контракта данных | `./gradlew :idea-plugin:exportRules` |
-
-По умолчанию плагин компилируется и запускается против **локальной** IDE на
-платформе IntelliJ: путь задаётся параметром `localIdePath` в `gradle.properties`
-(по умолчанию — GIGA IDE) и переопределяется флагом:
-
-```bash
-./gradlew :idea-plugin:buildPlugin -PlocalIdePath="/path/to/IDE.app"
-```
-
-Там, где локальной IDE нет (CI, чужая машина), источник платформы переключается
-на maven-репозитории:
-
-```bash
-./gradlew :idea-plugin:test -PideSource=maven -PplatformVersion=2025.1
-```
-
-## Расширение для VS Code
-
-```bash
-npm --prefix vscode-extension install
-npm --prefix vscode-extension test          # контракты + ядро + адаптер + корпус
-npm --prefix vscode-extension run compile   # бандл out/extension.js
-npm --prefix vscode-extension run package   # dist/smartapp-dsl-<версия>.vsix
-```
-
-Установка и разработка описаны в [vscode-extension/README.md](vscode-extension/README.md).
-
 ## Технологический стек
+
+Плагин IntelliJ-платформы:
 
 - **Kotlin** 2.0.21 (JVM target 21)
 - **IntelliJ Platform Gradle Plugin** 2.16.0 (требует Gradle 9.0+)
@@ -322,6 +345,17 @@ npm --prefix vscode-extension run package   # dist/smartapp-dsl-<версия>.v
 - бандл-плагин `com.intellij.modules.json` (JSON PSI)
 - **gson** 2.11.0 — парсинг словаря ключевых слов
 - **JUnit 4** + `BasePlatformTestCase` — тесты
+
+Расширение VS Code:
+
+- **TypeScript** 5.5, **Node** 20+, VS Code 1.90+
+- **jsonc-parser** — разбор JSON вместо PSI
+- **esbuild** — бандл `out/extension.js`
+- **vitest** — ядро, адаптер (на фейковом модуле `vscode`) и общий корпус;
+  **@vscode/test-electron** — smoke в настоящем редакторе
+
+Общее: **Python 3** — генератор словаря и публикация релиза; оба контракта из
+`shared/` читают обе стороны.
 
 ## Словарь ключевых слов
 
@@ -343,18 +377,22 @@ vendored-копия исходника фреймворка (`tools/vendor/`), �
 ## Структура проекта
 
 ```
-settings.gradle.kts, gradle.properties, gradlew   # сборка плагина (Gradle 9)
-.gitlab-ci.yml                                    # CI: контракты + тесты обеих сторон
-idea-plugin/build.gradle.kts                      # модуль плагина
-idea-plugin/src/main/kotlin/ru/sber/smartapp/dsl/ # исходники плагина
+settings.gradle.kts, gradle.properties, gradlew    # сборка плагина (Gradle 9)
+.gitlab-ci.yml                                     # полный пайплайн: контракты, тесты, упаковка, релиз
+.github/workflows/ci.yml                           # лёгкий пайплайн зеркала
+tools/ci/                                          # общая логика CI: шаги, окружение, публикация
+idea-plugin/build.gradle.kts                       # модуль плагина
+idea-plugin/src/main/kotlin/ru/sber/smartapp/dsl/  # исходники плагина
 idea-plugin/src/main/resources/META-INF/plugin.xml # дескриптор плагина
-idea-plugin/src/test/kotlin/                      # тесты плагина
-vscode-extension/src/core/                        # ядро расширения (без vscode API)
-vscode-extension/src/vscode/                      # адаптер VS Code
-vscode-extension/test/                            # тесты ядра, адаптера, корпуса, интеграции
-shared/rules/, shared/keywords/, shared/fixtures/ # общие контракты
-tools/generate_keywords.py, tools/vendor/         # генератор словаря
-docs/plans/, docs/insights/, arch/, mds/          # материалы для AI-агентов
+idea-plugin/src/test/kotlin/                       # тесты плагина
+vscode-extension/src/core/                         # ядро расширения (без vscode API)
+vscode-extension/src/vscode/                       # адаптер VS Code
+vscode-extension/test/                             # тесты ядра, адаптера, корпуса, интеграции
+shared/rules/, shared/keywords/, shared/fixtures/  # общие контракты
+tools/generate_keywords.py, tools/vendor/          # генератор словаря
+tools/package.sh, tools/check-version.sh           # упаковка обеих реализаций и сверка версий
+dist/                                              # артефакты релиза (zip + vsix)
+docs/plans/, docs/insights/, arch/, mds/           # материалы для AI-агентов
 ```
 
 ## Документация для разработчиков
