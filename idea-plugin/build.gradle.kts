@@ -1,6 +1,7 @@
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import org.gradle.api.tasks.options.Option
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -41,6 +42,13 @@ val platformVersion: String = providers.gradleProperty("platformVersion").getOrE
 val pluginSinceBuild: String = providers.gradleProperty("pluginSinceBuild").get()
 
 /**
+ * Версия IDE, на которой верификатор проверяет верхнюю границу совместимости.
+ * `untilBuild` не задан, то есть плагин обещает работать и в свежих сборках, —
+ * значит верхний край обязан проверяться, а не подразумеваться.
+ */
+val verifierLatestVersion: String = providers.gradleProperty("verifierLatestVersion").get()
+
+/**
  * Узкий classpath для экспортёра контракта: только собственные классы, stdlib и
  * gson. Платформа IDEA экспортёру не нужна (таблицы контракта её не импортируют),
  * поэтому CI-джоба контракта не тянет дистрибутив IDE.
@@ -77,6 +85,20 @@ intellijPlatform {
     }
     buildSearchableOptions = false
     instrumentCode = false
+
+    pluginVerification {
+        ides {
+            // Список задан явно, а не через `recommended()`: тот берёт все
+            // актуальные мажорные версии (на момент написания — пять IDE), и в
+            // CI это пять дистрибутивов на каждый пайплайн, причём набор молча
+            // растёт с каждым релизом JetBrains. Проверяются два края
+            // обещанного диапазона: нижний (`sinceBuild`, он же платформа
+            // сборки) и верхний (untilBuild не задан). Расширять список — это
+            // осознанная правка здесь, а не сюрприз в счёте за минуты.
+            create(IntelliJPlatformType.IntellijIdeaCommunity, platformVersion)
+            create(IntelliJPlatformType.IntellijIdeaUltimate, verifierLatestVersion)
+        }
+    }
 }
 
 /**
