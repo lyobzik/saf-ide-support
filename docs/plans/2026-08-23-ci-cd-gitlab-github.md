@@ -7,7 +7,7 @@
 `origin/master` — нет. Локальный `HEAD` опережает эту точку на 38 коммитов.
 
 Запускался ли пайплайн — из репозитория не видно: анонимный GET к
-`https://gitlab.com/api/v4/projects/lyobzik%2Fnlpf-idea` отвечает 404, проект
+`https://gitlab.com/api/v4/projects/lyobzik%2Fsaf-ide-support` отвечает 404, проект
 приватный. Поэтому первым идёт не конфиг, а взгляд на уже случившееся (этап 0).
 
 Задача: довести CI до состояния, подтверждённого прогоном, добавить CD (релиз по
@@ -474,7 +474,7 @@ JSON (`json`), SHA-256 (`hashlib`) — стандартная библиотек
 | Поле | Значение |
 |---|---|
 | `name` | имя файла: `smartapp-dsl-<версия>.zip` и `smartapp-dsl-<версия>.vsix` — человек в UI видит ровно то, что скачает |
-| `url` | `<API_URL>/projects/<PROJECT_PATH>/packages/generic/smartapp-dsl/<версия>/<имя>`, где обе части — константы скрипта, а путь проекта закодирован (`lyobzik%2Fnlpf-idea`) |
+| `url` | `<API_URL>/projects/<PROJECT_PATH>/packages/generic/smartapp-dsl/<версия>/<имя>`, где обе части — константы скрипта, а путь проекта закодирован (`lyobzik%2Fsaf-ide-support`) |
 | `link_type` | `package` |
 | `direct_asset_path` | **не задаётся**: второй адрес той же вещи — второй повод разъехаться |
 
