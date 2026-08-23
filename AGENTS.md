@@ -26,6 +26,9 @@ JSON-парсера редактора**. Возможности (одинако
   выражения Jinja (`{% if mai<caret> %}`), если целевая форма известна; после
   `|` (позиция имени фильтра) не предлагается ни переменная, ни поле;
 - переход с самой переменной `main_form` на определение целевой формы;
+- ключевые слова, зарегистрированные самим приложением (`RESOURCES` в
+  `app_config.py` → подкласс `SmartAppResources` → методы `init_*`): подсветка,
+  автодополнение, переход к строке регистрации в `.py` и поиск использований;
 - переход к файлу шаблона: `"file"` при `"type": "unified_template"` ведёт в
   `static/references/templates/<значение>`; в той же позиции автодополняются
   имена файлов каталога шаблонов (вложенные пути — целиком).
@@ -45,7 +48,7 @@ tools/              # генератор словаря
 
 | Контракт | Артефакт | Проверка |
 |---|---|---|
-| Данные: виды, каталоги, сегменты пути, ссылочные правила (включая файловые), ключи контекста `type`, структурные ключи, `form`/`fields`, `main_form`, словарь | `shared/rules/rules.json`, `shared/keywords/keywords.json` (+ схемы) | `:idea-plugin:exportRules --check`, `generate_keywords.py --check`, `npm run verify:contract` |
+| Данные: виды, каталоги, сегменты пути, ссылочные правила (включая файловые), ключи контекста `type`, структурные ключи, `form`/`fields`, `main_form`, реестры фреймворка (`keywordRegistries`), правила сканирования ресурсов (`resourceScan`), словарь | `shared/rules/rules.json`, `shared/keywords/keywords.json` (+ схемы) | `:idea-plugin:exportRules --check`, `generate_keywords.py --check`, `npm run verify:contract` |
 | Поведение: резолв, диагностика, completion, Jinja, изоляция наборов, строгость индексации | `shared/fixtures/**` | `SmartAppConformanceTest` (Kotlin) и `test/conformance` (TS) на одном корпусе |
 
 Правила работы с контрактом:
@@ -106,10 +109,16 @@ tools/              # генератор словаря
 | `reference/SmartAppFieldRef` + `FormFieldRefDescriptor` | `FormFieldRef(form, field)` — типизированный ключ поля (FIELD не расширяет `SmartAppRefKind`); `targetFormOf` / `isFieldDefinition` |
 | `reference/SmartAppFieldReference` | Поли-вариантная ссылка на поле формы; диапазон только на имя поля |
 | `reference/SmartAppFormVariableReference` | Ссылка с переменной `main_form` на определение целевой формы |
+| `reference/SmartAppCustomKeywordReference` | Мягкая поли-вариантная ссылка со значения `type` на регистрацию в Python-коде приложения; индекс не читает, поэтому dumb-guard не нужен |
+| `resources/SmartAppResourceScanner` | Детерминированный разбор Python: маскирование строк и комментариев, логические строки, стек блоков, формы регистрации (порт `core/pythonScan.ts`) |
+| `resources/SmartAppResourceResolver` | Цепочка от `RESOURCES` и свёртка регистраций по правилам Python (`super()`, переопределение); fail-closed на цикле, глубине и множественной базе (порт `core/resourceKeywords.ts`) |
+| `resources/SmartAppCustomKeywords` | Словарь приложения по VFS с кэшем `CachedValuesManager` (без `FileBasedIndex`, поэтому работает и в dumb mode); правила владения и исключённых каталогов |
+| `resources/SmartAppRegistrationElement` | `FakePsiElement` строки регистрации: файл, сырой диапазон имени, навигация; `setName` бросает `IncorrectOperationException` |
 | `completion/SmartAppCompletionContributor` | `DumbAware`-автодополнение ключевых слов, имён сущностей, полей формы после `main_form.<caret>` и самой переменной `main_form` на месте идентификатора — в любом выражении Jinja (`{{ }}` и `{% %}`) — и имён файлов шаблонов в позиции `"file"` |
+| `findusages/SmartAppCustomKeywordUsages` + `SmartAppFindUsagesHandlerFactory` | Цель поиска по элементу под кареткой и обход JSON-файлов приложения (без пятого индекса), с уважением к `LocalSearchScope` и `checkCanceled` |
 | `findusages/SmartAppFindUsagesProvider` + `…ElementDescriptionProvider` | Find Usages для определений и полей форм (подпись `<form>.<field>`); вхождения псевдонима `main_form` в список не входят — имени формы в тексте нет |
 | `rename/SmartAppRenameProcessor` | Ограничивает rename ссылками плагина в своём наборе `references`: иначе платформа переписывает одноимённые ключи чужих наборов |
-| `contract/SmartAppContract` + `SmartAppSpecs` | Таблицы данных DSL (виды, ссылочные правила, ключи контекста, структурные ключи, пути, `main_form`) — их использует рантайм и сериализует экспортёр |
+| `contract/SmartAppContract` + `SmartAppSpecs` | Таблицы данных DSL (виды, ссылочные правила, ключи контекста, структурные ключи, пути, `main_form`, реестры фреймворка и правила сканирования ресурсов) — их использует рантайм и сериализует экспортёр |
 | `contract/ExportRules` | Сериализация тех же таблиц в `shared/rules/rules.json`; режим `--check` для CI |
 
 Исходники расширения: `vscode-extension/src/`
@@ -122,9 +131,10 @@ tools/              # генератор словаря
 | `core/jsonDecode.ts`, `core/jinjaLexer.ts` | Порты `JsonStringLiteralDecoder` и `SmartAppJinjaLexer` (1:1) |
 | `core/refRules.ts`, `core/fileRefRules.ts`, `core/typeContext.ts`, `core/fieldRef.ts` | Порты одноимённых Kotlin-объектов |
 | `core/indexGate.ts` | Строгость индексации — эквивалент `JsonPsi.hasError` |
+| `core/pythonScan.ts`, `core/resourceKeywords.ts` | Порты сканера Python и резолвера ресурсов приложения (1:1 с `resources/**` плагина) |
 | `core/index.ts` | Воркспейс-индекс вместо четырёх `FileBasedIndex`, обратный индекс использований и реестр не-DSL файлов набора (для файловых ссылок) |
 | `core/semantics.ts`, `core/completion.ts`, `core/semanticTokens.ts`, `core/rename.ts` | Резолв, диагностика, автодополнение, подсветка, переименование — всё в смещениях |
-| `vscode/workspace.ts` | `findFiles`, watcher, дебаунс, хранилище текстов; кормит ядро через `upsert`/`remove` |
+| `vscode/workspace.ts` | `findFiles`, watcher (JSON и `**/*.py`), дебаунс, хранилище текстов; кормит ядро через `upsert`/`remove`, сканирования Python выполняются строго по одному |
 | `vscode/providers.ts`, `vscode/positions.ts` | Провайдеры VS Code и трансляция смещений в `Position` |
 
 Ресурсы: `src/main/resources/META-INF/plugin.xml`,
@@ -164,7 +174,7 @@ tools/              # генератор словаря
 | Проверка совместимости | `./gradlew :idea-plugin:verifyPlugin` |
 | Экспорт контракта данных | `./gradlew :idea-plugin:exportRules` (проверка: `--check`) |
 | Сборка против maven-платформы | `./gradlew :idea-plugin:test -PideSource=maven` |
-| Регенерация словаря | `python tools/generate_keywords.py [path-to-resources__init__.py]` (проверка: `--check`) |
+| Регенерация словаря | `python tools/generate_keywords.py [path-to-resources__init__.py]` (проверка: `--check`) — **только после** `exportRules`: таблицу реестров генератор читает из `rules.json` |
 | Тесты расширения | `npm --prefix vscode-extension test` |
 | Интеграционные тесты VS Code | `npm --prefix vscode-extension run test:integration` |
 | Бандл расширения | `npm --prefix vscode-extension run compile` |
@@ -172,6 +182,19 @@ tools/              # генератор словаря
 | Упаковка плагина в `dist/` | `./gradlew :idea-plugin:packagePlugin` → `dist/smartapp-dsl-<version>.zip` |
 | Упаковка обеих реализаций | `tools/package.sh` |
 | Сверка версий манифестов | `sh tools/check-version.sh` |
+
+Порядок при изменении таблицы реестров (`keywordRegistries`) жёсткий — сначала
+Kotlin-таблицы, потом словарь, иначе генератор возьмёт прежний снимок:
+
+```bash
+./gradlew :idea-plugin:exportRules        # 1. Kotlin-таблицы -> shared/rules/rules.json
+python tools/generate_keywords.py         # 2. читает таблицу оттуда -> keywords.json
+./gradlew :idea-plugin:exportRules --check && python tools/generate_keywords.py --check
+npm --prefix vscode-extension run verify:contract
+```
+
+В CI джобы независимы — они проверяют уже закоммиченные снимки; порядок важен
+локально.
 
 > Gradle в этом окружении иногда не замечает правки, сделанные извне IDE
 > (устаревший кэш file-watching), и берёт классы из прошлой компиляции.
@@ -300,6 +323,35 @@ docs/plans/, docs/insights/, arch/, mds/           # материалы для A
   не переписывает, в Find Usages формы она не попадает (платформа ищет по
   слову-имени, которого здесь нет), и неразрешённая форма здесь не
   подсвечивается — об этом уже сообщает диагностика на самом значении `form`.
+- **Словарь ключевых слов — это пол, а не потолок.** Приложение добавляет свои
+  слова через `RESOURCES` в `app_config.py`, и они работают наравне с
+  фреймворковыми. Правила разбора цепочки (порт 1:1 с обеих сторон): базовые
+  регистрации учитываются **только** при текстовом `super()`, при совпадении
+  пары «категория + имя» побеждает производный класс, **любая** множественная
+  база отключает разбор целиком (библиотечный миксин невидим сканеру, но
+  участвует в MRO). Слова фреймворка при этом не вычитаются никогда: снимок
+  `keywords.json` — единственный их источник, гасить категорию из-за текстовой
+  эвристики про `super()` дороже, чем оставить лишнее слово.
+- **Приложение — каталог, содержащий `static/references`.** Отсюда владение:
+  вложенный `subapp` — отдельное приложение, его модули в словарь внешнего не
+  идут и наоборот. Во вхождениях Find Usages действуют **два разных** фильтра:
+  набор внутри соседнего `venv` отсекает владение (у него свой корень
+  приложения), а зависимость, вендоренная внутрь самого набора, — только список
+  исключённых каталогов из контракта. Оба случая закреплены кейсами корпуса.
+- **Ресурсы приложения читаются без `FileBasedIndex`.** Цепочка от `RESOURCES` —
+  два-три файла; `SmartAppCustomKeywords` берёт их по VFS и кэширует
+  `CachedValuesManager` (провайдер не удерживает PSI — платформа это проверяет).
+  Побочный выигрыш: dumb-guard не нужен, кастомные слова доступны и во время
+  индексации. Единица пересборки — приложение целиком: правка базового класса
+  меняет словарь производного.
+- **Имя регистрации декодируется, диапазон остаётся сырым.** Имя сравнивается со
+  значением JSON, которое мы тоже декодируем (`"custom\u0041"` → `customA`), а
+  диапазон служит целью перехода и вхождением — поэтому `getText()`
+  fake-элемента читается из файла, а не из имени.
+- **Направление «каретка в Python» — платформенное, не наше.** Без плагина
+  Python `.py` — plain text, элемента нужного вида не существует, и
+  автоматический гейт его не покрывает: в тестовой платформе `python-ce` нет.
+  Проверяется вручную при приёмке и описано в README.
 - **Ссылка на файл — отдельный вид правила.** `SmartAppSpecs.fileRefRules`
   (`"file"` при `"type": "unified_template"`) резолвится по пути внутри набора
   `references`, а не через индекс определений, поэтому dumb-guard ей не нужен.
@@ -428,6 +480,11 @@ matcher'ом, а ядро расширения — нет.
   `RefKind` (completion работает на in-memory копии, теряющей реальный путь).
 - Обязательные негативные/IDE-кейсы: dumb mode, невалидный JSON, дубликаты
   определений (`multiResolve().size == 2`), Jinja, файлы вне `static/references/`.
+- Фикстура корпуса может содержать `.py` приложения (`app_config.py` и модули
+  ресурсов) — их читают обе стороны. Каретку в `.py` ставить нельзя: в тестовой
+  платформе это plain text. Словарь приложения проверяет секция
+  `customKeywords` (состав + место действующей регистрации), формат — в
+  `shared/fixtures/README.md`.
 
 ### Окружение
 
