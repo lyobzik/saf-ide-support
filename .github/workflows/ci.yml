@@ -1,31 +1,20 @@
-# CI зеркала на GitHub — второй хостинг, намеренно лёгкий.
+# CI/CD на GitHub — публичный репозиторий, минуты стандартных runner'ов
+# бесплатны, поэтому здесь идёт полный набор проверок, включая сторону IDEA.
 #
-# Что здесь проверяется: словарь ключевых слов, версии манифестов, схемы общих
-# артефактов, алгоритм публикации и юнит-сторона расширения VS Code.
+# Разделение ролей с GitLab: там артефакты попадают в реестр пакетов проекта и
+# доступны участникам, здесь — в GitHub Release, откуда их скачивают анонимно.
+# Один тег отрабатывают оба хостинга, и это осознанно: у публикаций разные
+# адресаты, а артефакты собраны из одного коммита теми же командами. Побайтово
+# они при этом различаются — упаковка не воспроизводима, — поэтому сверять хеши
+# между площадками нельзя.
 #
-# Чего здесь НЕТ и почему:
-#   * сторона IDEA (тесты плагина и verifyPlugin) — каждому такому шагу нужен
-#     дистрибутив платформы, полный пайплайн живёт в GitLab;
-#   * снимок `rules.json` (`contract:rules`) — его проверка компилирует
-#     исходники плагина и тянет ту же платформу, «лёгким» workflow с ним не был
-#     бы;
-#   * интеграционный тест VS Code — ему нужны системные библиотеки Electron, а
-#     `ubuntu-latest` и Debian-контейнер GitLab различаются и правами, и
-#     именами пакетов; одна проверенная площадка лучше двух похожих;
-#   * упаковка и релиз — владелец релиза один, и это GitLab. Иначе один
-#     зеркалированный тег запустил бы два независимых релизных процесса.
-#
-# Зелёный статус здесь означает ровно перечисленное в первом абзаце, и это
-# записано в README: бейдж не должен обещать больше, чем проверяет.
+# В workflow нет ни одной команды сборки или проверки — только вызовы
+# `tools/ci/`, тех же самых, что вызывает GitLab и что запускаются локально.
 #
 # Actions закреплены по commit SHA, как образы GitLab — по digest: `@v4` —
 # движущийся тег, и без пина содержимое gate'а меняется без единой правки в
 # репозитории. Точная версия оставлена комментарием, чтобы обновление было
 # осознанным шагом, а не следствием чужого релиза.
-#
-# Фильтр тегов шире, чем у GitLab (там только `v<major>.<minor>.<patch>`):
-# синтаксисы разные, и изображать их равенство нечем. Релизным тег делает
-# `contract:version`, который идёт на обоих хостингах.
 
 name: CI
 
@@ -33,13 +22,21 @@ on:
   pull_request:
   push:
     branches: [master]
-    tags: ["v*"]
+    # Фильтр сужен до релизных тегов: с `v*` тег вроде `vfoo` запускал бы
+    # тяжёлую сборку целиком ради отказа в самом конце. Второй рубеж —
+    # `contract:version`: любой дошедший до него тег обязан совпасть с версией
+    # манифестов.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # На ветках и PR отмена прошлого запуска экономит время, а на теге она может
+  # оборвать публикацию между двумя ассетами — релиз это переживёт (повтор
+  # дочитает состояние), но оставлять такую возможность незачем.
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
+# Право на запись есть только у публикации релиза и только по тегу.
 permissions:
   contents: read
 
@@ -65,6 +62,26 @@ jobs:
       - run: tools/ci/run.sh contract:schema
       - run: tools/ci/run.sh test:publish
 
+  idea:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      # Снимок контракта, тесты плагина и верификатор — одним шагом: каждому
+      # нужен один и тот же дистрибутив платформы, а он не бесплатен по времени.
+      - run: tools/ci/run.sh test:idea
+      - if: github.ref_type == 'tag'
+        run: tools/ci/run.sh package:idea
+      - if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-plugin
+          path: dist/*.zip
+          if-no-files-found: error
+
   vscode:
     runs-on: ubuntu-latest
     steps:
@@ -75,8 +92,50 @@ jobs:
           cache: npm
           cache-dependency-path: vscode-extension/package-lock.json
       - run: tools/ci/run.sh test:vscode
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vitest-junit
           path: vscode-extension/build/test-results/vitest.xml
+          if-no-files-found: warn
+      - if: github.ref_type == 'tag'
+        run: tools/ci/run.sh package:vscode
+      - if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-extension
+          path: dist/*.vsix
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [contract, idea, vscode]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Среда `release` — операционный предохранитель штатного процесса, а не
+    # граница безопасности. С required reviewers релиз не уедет от случайно
+    # поставленного тега без подтверждения человеком.
+    #
+    # Границей от участника с правом записи она не является и не может быть:
+    # роль Write позволяет создавать и редактировать Releases напрямую, минуя
+    # CI, а в workflow — поднять права `GITHUB_TOKEN`. Внутри одного
+    # репозитория отделить публикацию от такого участника технически нельзя;
+    # для этого нужен отдельный репозиторий релизов со своим списком писателей.
+    environment: release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      # Публикация идемпотентна: повторный запуск дочитывает **черновик** и
+      # доливает недостающее либо внятно отказывает, но второго релиза не
+      # создаёт. Уже опубликованный неполный релиз не дописывается — это работа
+      # для человека, а не молчаливая правка того, что люди уже видят.
+      - run: tools/ci/publish_github.py "$GITHUB_REF_NAME"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

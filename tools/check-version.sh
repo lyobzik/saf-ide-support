@@ -20,7 +20,16 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-tag=${1:-${CI_COMMIT_TAG:-}}
+
+# Различие «аргумент не передан» и «передана пустая строка» существенно:
+# пустая строка — это «тега нет» (так выглядит запуск на ветке), и подставлять
+# вместо неё CI_COMMIT_TAG нельзя. Поэтому ветвление по числу аргументов, а не
+# по пустоте первого: `${1:-…}` эти два случая склеивает.
+if [ "$#" -gt 0 ]; then
+  tag=$1
+else
+  tag=${CI_COMMIT_TAG:-}
+fi
 
 plugin_version=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' "$root/idea-plugin/build.gradle.kts" | head -1)
 extension_version=$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' "$root/vscode-extension/package.json" | head -1)
@@ -41,20 +50,19 @@ if [ "$plugin_version" != "$extension_version" ]; then
   exit 1
 fi
 
-# Теги, не похожие на версию (например `sandbox`), релизными не считаются и
-# упаковку не запускают — их проверять нечем и незачем.
-case "$tag" in
-  "")
-    ;;
-  v[0-9]*|[0-9]*)
-    if [ "$tag" != "v$plugin_version" ]; then
-      echo "Tag $tag does not match version $plugin_version" >&2
-      echo "Release tags are named v<version>, so this one must be v$plugin_version." >&2
-      exit 1
-    fi
-    echo "Version $plugin_version (idea-plugin, vscode-extension, tag $tag)"
-    exit 0
-    ;;
-esac
+# Тег проверяется строго: если он дошёл до этой проверки, значит пайплайн
+# считает его релизным, и расходиться два мнения о том, релиз это или нет, не
+# должны. Раньше «непохожий на версию» тег (`vfoo`) проходил как нерелизный —
+# и на GitHub, где фильтр шире, это означало полный прогон тяжёлых job'ов ради
+# отказа в самом конце, на поиске несуществующего файла.
+if [ -n "$tag" ]; then
+  if [ "$tag" != "v$plugin_version" ]; then
+    echo "Tag $tag does not match version $plugin_version" >&2
+    echo "Release tags are named v<version>, so this one must be v$plugin_version." >&2
+    exit 1
+  fi
+  echo "Version $plugin_version (idea-plugin, vscode-extension, tag $tag)"
+  exit 0
+fi
 
 echo "Version $plugin_version (idea-plugin, vscode-extension)"
