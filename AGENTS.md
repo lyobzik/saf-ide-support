@@ -41,12 +41,12 @@ vscode-extension/   # расширение VS Code (TypeScript, npm)
 shared/             # общие контракты: rules, keywords, fixtures
 tools/              # генератор словаря
 .gitlab-ci.yml      # полный пайплайн (основной хостинг)
-.github/workflows/  # лёгкий пайплайн зеркала
+.github/workflows/  # публичный репозиторий: проверки и релиз
 tools/ci/           # общая логика CI: шаги, окружение, публикация
 ```
 
 Системы сборки не объединяются: Gradle собирает плагин, npm — расширение.
-Gate'ов тоже два — GitLab (полный) и GitHub (лёгкий), но проверки у них общие:
+Gate'ов тоже два — GitLab и GitHub, — но проверки у них общие:
 они описаны в `tools/ci/` и вызываются обоими конфигами.
 Согласованность держат **два** контракта, у каждого своя fail-closed проверка:
 
@@ -278,8 +278,9 @@ npm --prefix vscode-extension run verify:contract
 ```
 settings.gradle.kts, gradle.properties, gradlew    # сборка плагина (Gradle 9)
 .gitlab-ci.yml                                     # полный пайплайн: контракты, тесты, упаковка, релиз
-.github/workflows/ci.yml                           # лёгкий пайплайн зеркала
+.github/workflows/ci.yml                           # публичный репозиторий: проверки и релиз
 tools/ci/run.sh, deps-debian.sh, publish_gitlab.py # общая логика CI и публикация
+tools/ci/publish_github.py                         # публикация релиза на GitHub
 idea-plugin/build.gradle.kts                       # модуль плагина
 idea-plugin/src/main/kotlin/ru/sber/smartapp/dsl/  # исходники плагина
 idea-plugin/src/main/resources/META-INF/plugin.xml # дескриптор
@@ -510,7 +511,8 @@ matcher'ом, а ядро расширения — нет.
 |---|---|---|
 | `tools/ci/run.sh` | шаги сборки и проверок | воспроизводится локально |
 | `tools/ci/deps-debian.sh` | `apt-get` для интеграционного теста | зависит от образа |
-| `tools/ci/publish_gitlab.py` | реестр пакетов и Release | зависит от API хостинга |
+| `tools/ci/publish_gitlab.py` | реестр пакетов и Release GitLab | зависит от API хостинга |
+| `tools/ci/publish_github.py` | Release GitHub с ассетами | зависит от API хостинга |
 
 Правила, которые легко нарушить незаметно:
 
@@ -519,17 +521,25 @@ matcher'ом, а ядро расширения — нет.
   пайплайнов;
 - **в `run.sh` нет переменных хостинга**: тег передаётся аргументом
   (`grep -c 'CI_[A-Z]\|GITHUB_' tools/ci/run.sh` обязан давать 0);
-- **сторона IDEA — только в GitLab.** Снимок `rules.json` проверяется первой
-  задачей внутри `test:idea`, а не на стадии `contract`: `exportRules` зависит
-  от `sourceSets.main.output`, то есть компилирует плагин и тянет платформу.
-  Вернуть проверку в дешёвую стадию можно, выделив модуль `:contract`;
+- **снимок `rules.json` проверяется внутри `test:idea`**, а не на стадии
+  `contract`: `exportRules` зависит от `sourceSets.main.output`, то есть
+  компилирует плагин и тянет платформу. Вернуть проверку в дешёвую стадию
+  можно, выделив модуль `:contract`;
+- **сторона IDEA идёт на обоих хостингах**, но в GitLab она дорога (минуты
+  тарифа), а на публичном GitHub бесплатна. Интеграционный тест VS Code, наоборот,
+  только в GitLab: системные библиотеки Electron ставятся одним проверенным
+  способом, а не двумя похожими;
 - **список IDE для `verifyPlugin` задан явно** (`pluginVerification.ides` в
   `idea-plugin/build.gradle.kts`). По умолчанию плагин платформы берёт
   `recommended()` — это пять дистрибутивов IDE на каждый прогон, и набор молча
   растёт с каждым релизом JetBrains. Проверяются два края обещанного диапазона:
   `platformVersion` (нижний, он же `sinceBuild`) и `verifierLatestVersion`
   (верхний, потому что `untilBuild` не задан);
-- **релиз выпускает только GitLab.** Публикация идемпотентна: состояние реестра
+- **релиз выпускают оба хостинга, и это не дубль, а разные адресаты:** GitHub —
+  публичный Release со скачиванием без аккаунта, GitLab — реестр пакетов
+  приватного проекта. Артефакты собирает один и тот же `package:*` из одного
+  коммита, версию сверяет `contract:version` на обеих сторонах.
+- **публикация в GitLab.** Публикация идемпотентна: состояние реестра
   читается до записи, отказ `PUT` разбирается по состоянию, а не по коду
   ответа, набор ссылок и коммит тега сверяются и у существующего релиза, и у
   только что созданного. Последнее — не перестраховка: атомарной привязки
@@ -550,8 +560,10 @@ matcher'ом, а ядро расширения — нет.
 ### Окружение
 
 - Нет системных JDK / Gradle / `gh`. JDK — JBR внутри GIGA IDE
-  (`…/Contents/jbr/Contents/Home`), Gradle — через wrapper, GitHub — через
-  `curl` к API. Node и npm — есть (нужны расширению).
+  (`…/Contents/jbr/Contents/Home`), Gradle — через wrapper, разовые запросы к
+  API хостингов — через `curl`. Node и npm — есть (нужны расширению).
+  Скрипты публикации при этом `curl` не используют: они на Python и обходятся
+  стандартной библиотекой, чтобы образу job'а нечего было доустанавливать.
 - `ideSource=local` (по умолчанию) берёт платформу из локальной IDE по
   `localIdePath`; `ideSource=maven` — из maven-репозиториев по `platformVersion`.
   CI работает только со вторым вариантом.
