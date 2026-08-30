@@ -27,11 +27,23 @@ const stagingDir = join(distDir, ".staging");
 const manifest = JSON.parse(readFileSync(join(extensionRoot, "package.json"), "utf8"));
 const vsixName = `${manifest.name}-${manifest.version}.vsix`;
 
-/** Без этих файлов расширение нерабочее. */
-const REQUIRED = ["package.json", "out/extension.js"];
+/**
+ * Точный состав пакета: и лишнего быть не должно, и недостающего.
+ *
+ * Раньше обязательными были только манифест и бандл, поэтому пакет без
+ * `README.md` и `LICENSE` считался нормальным — а это то, что пользователь
+ * видит в карточке расширения и по чему судит о лицензии.
+ */
+const EXPECTED = ["package.json", "README.md", "LICENSE", "out/extension.js"];
 
-/** А это в пакет попадать не должно — ни при какой правке `.vscodeignore`. */
-const FORBIDDEN = [/^src\//, /^test\//, /^scripts\//, /^node_modules\//, /^out\/test\//, /\.map$/, /\.vsix$/];
+/**
+ * Почему список точный, а не набор запретов и не маска.
+ *
+ * Чёрный список уже подвёл: `build/test-results/vitest.xml` не подходил ни под
+ * один запрет и уехал в пакет — 80 КБ внутреннего JUnit-отчёта у пользователя.
+ * Маска `out/*.js` подвела бы следующей: `build.mjs` не чистит `out/` перед
+ * сборкой, поэтому там может лежать файл от прошлой команды — и он бы прошёл.
+ */
 
 const vsceBin = join(
   extensionRoot,
@@ -57,8 +69,8 @@ try {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const missing = REQUIRED.filter((name) => !files.includes(name));
-  const unexpected = files.filter((name) => FORBIDDEN.some((pattern) => pattern.test(name)));
+  const missing = EXPECTED.filter((name) => !files.includes(name));
+  const unexpected = files.filter((name) => !EXPECTED.includes(name));
 
   if (missing.length > 0 || unexpected.length > 0) {
     if (missing.length > 0) console.error(`Package is missing required files: ${missing.join(", ")}`);

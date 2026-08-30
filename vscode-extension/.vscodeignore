@@ -11,4 +11,5 @@ vitest.config.ts
 .eslintrc.json
 **/*.map
 out/test/**
+build/**
 **/*.vsix
