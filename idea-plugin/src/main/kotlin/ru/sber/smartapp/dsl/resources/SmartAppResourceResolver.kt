@@ -44,9 +44,25 @@ object SmartAppResourceResolver {
         fun exists(path: String): Boolean
     }
 
-    private data class ClassRef(val file: String, val name: String)
+    /** Класс, на который указывает значение: путь модуля внутри приложения и имя. */
+    data class ClassRef(val file: String, val name: String)
 
-    private data class ChainEntry(val cls: SmartAppResourceScanner.PyClass, val file: String)
+    data class ChainEntry(val cls: SmartAppResourceScanner.PyClass, val file: String)
+
+    /**
+     * Разрешённая цепочка наследования.
+     *
+     * [classes] — классы **приложения** от базы к производному; пустой список
+     * значит, что активный класс библиотечный и приложение к нему ничего не
+     * добавило. Для ресурсов это «добавить нечего», для модели пользователя —
+     * основной случай (`USER = User`, либо `USER` не задан вовсе).
+     *
+     * [libraryBase] — точечное имя первой базы, которую не удалось прочитать
+     * внутри приложения: `scenarios.user.user_model.User`. `null` значит, что
+     * цепочка кончилась классом без базы. Ресурсам это имя не нужно, модели
+     * пользователя по нему выбирается пол из снимка фреймворка.
+     */
+    data class ChainResult(val classes: List<ChainEntry>, val libraryBase: String?)
 
     /**
      * Ключевые слова активного класса ресурсов приложения.
@@ -62,12 +78,15 @@ object SmartAppResourceResolver {
         val value = config.topLevelVars[ResourceScanSpec.resourcesVariable] ?: return emptyList()
 
         val start = classRefOf(value, config, ResourceScanSpec.configFile) ?: return emptyList()
+        // Ресурсам нужны только классы приложения: слова фреймворка приходят из
+        // снимка `keywords.json`, а не из цепочки, поэтому `libraryBase` здесь
+        // не смотрится, а пустой список классов означает «добавить нечего».
         val chain = resolveChain(start, files) ?: return emptyList()
-        return effectiveKeywords(chain)
+        return effectiveKeywords(chain.classes)
     }
 
     /** Куда указывает точечное значение в модуле [module], разобранном из [moduleFile]. */
-    private fun classRefOf(
+    fun classRefOf(
         value: String,
         module: SmartAppResourceScanner.PyModule,
         moduleFile: String,
@@ -89,16 +108,19 @@ object SmartAppResourceResolver {
         module.replace('.', '/') + ResourceScanSpec.fileExtension
 
     /**
-     * Цепочка классов от базы к производному. `null` — цепочка непригодна, и
-     * тогда слов нет вовсе: частичная цепочка дала бы слова, которые нечем
-     * подтвердить.
+     * Разрешает цепочку наследования от [start]. `null` — цепочка
+     * **недействительна**, то есть построить её не удалось: множественное
+     * наследование, цикл, исчерпанная глубина, класс, которого нет в
+     * прочитанном модуле, пропавший модуль приложения и база, которую не
+     * удалось сопоставить ни с импортом, ни с классом рядом. Частичная цепочка
+     * дала бы имена, которые нечем подтвердить.
      *
-     * Нормальный конец ровно один: база, которую не удалось прочитать внутри
-     * приложения, — это библиотечный `SmartAppResources`. Всё остальное —
-     * множественное наследование, цикл, исчерпанная глубина и класс, которого
-     * нет в прочитанном модуле, — ошибка.
+     * Нормальных концов два: база вне приложения (библиотечный класс — её имя
+     * уезжает в [ChainResult.libraryBase]) и класс без базы (`libraryBase` =
+     * `null`). Пустой список классов при непустом `libraryBase` — валидный
+     * результат: активный класс библиотечный.
      */
-    private fun resolveChain(start: ClassRef, files: AppFiles): List<ChainEntry>? {
+    fun resolveChain(start: ClassRef, files: AppFiles): ChainResult? {
         val chain = ArrayList<ChainEntry>()
         val visited = HashSet<String>()
         var current: ClassRef? = start
@@ -115,8 +137,11 @@ object SmartAppResourceResolver {
                 // значит это наш модуль, которого не хватает: подтвердить цепочку
                 // нечем. Если пакета нет — это библиотека, и цепочка закончилась.
                 val expectedInApp = files.exists(rootPackageOf(ref.file))
-                if (expectedInApp || chain.isEmpty()) return null
-                return chain.asReversed().toList()
+                if (expectedInApp) return null
+                // Пустая цепочка здесь — не отказ: значит, активный класс сам
+                // библиотечный. Ресурсы отобразят это в «добавить нечего»,
+                // модели пользователя этого хватает, чтобы выбрать пол.
+                return ChainResult(chain.asReversed().toList(), dottedNameOf(ref))
             }
             val module = SmartAppResourceScanner.parseModule(text)
             val cls = module.classes.firstOrNull { it.name == ref.name } ?: return null
@@ -129,7 +154,19 @@ object SmartAppResourceResolver {
             // подтвердить цепочку нечем.
             current = classRefOf(base, module, ref.file) ?: return null
         }
-        return chain.asReversed().toList() // от базы к производному — в порядке применения
+        // Класс без базы: цепочка кончилась, библиотечного пола у неё нет.
+        return ChainResult(chain.asReversed().toList(), libraryBase = null)
+    }
+
+    /**
+     * Точечное имя класса: `scenarios/user/user_model.py` + `User` ->
+     * `scenarios.user.user_model.User`. Пакетная форма отдельного случая не
+     * требует: [ClassRef.file] всегда хранит `.py`-вариант, а `__init__.py`
+     * подставляет уже [readModule].
+     */
+    private fun dottedNameOf(ref: ClassRef): String {
+        val module = ref.file.removeSuffix(ResourceScanSpec.fileExtension).replace('/', '.')
+        return if (module.isEmpty()) ref.name else "$module.${ref.name}"
     }
 
     /** Текст модуля: сначала `a/b/c.py`, затем `a/b/c/__init__.py`. */

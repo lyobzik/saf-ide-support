@@ -44,7 +44,8 @@ export interface AppFiles {
   exists(path: string): boolean;
 }
 
-interface ClassRef {
+/** Класс, на который указывает значение: путь модуля внутри приложения и имя. */
+export interface ClassRef {
   readonly file: string;
   readonly name: string;
 }
@@ -67,13 +68,20 @@ export function customKeywords(files: AppFiles): CustomKeyword[] {
   const start = classRefOf(value, config, resourceScan.configFile);
   if (start === undefined) return [];
 
+  // Ресурсам нужны только классы приложения: слова фреймворка приходят из
+  // снимка `keywords.json`, а не из цепочки, поэтому `libraryBase` здесь не
+  // смотрится, а пустой список классов означает «добавить нечего».
   const chain = resolveChain(start, files);
   if (chain === undefined) return [];
-  return effectiveKeywords(chain);
+  return effectiveKeywords(chain.classes);
 }
 
 /** Куда указывает точечное значение в модуле [module], разобранном из [moduleFile]. */
-function classRefOf(value: string, module: PyModule, moduleFile: string): ClassRef | undefined {
+export function classRefOf(
+  value: string,
+  module: PyModule,
+  moduleFile: string,
+): ClassRef | undefined {
   const direct = module.imports.get(value);
   if (direct !== undefined) return { file: modulePath(direct.module), name: direct.name };
 
@@ -93,22 +101,42 @@ function modulePath(module: string): string {
   return `${module.split(".").join("/")}${resourceScan.fileExtension}`;
 }
 
-interface ChainEntry {
+export interface ChainEntry {
   readonly cls: PyClass;
   readonly file: string;
 }
 
 /**
- * Цепочка классов от базы к производному. `undefined` — цепочка непригодна, и
- * тогда слов нет вовсе: частичная цепочка дала бы слова, которые нечем
- * подтвердить.
+ * Разрешённая цепочка наследования.
  *
- * Нормальный конец ровно один: база, которую не удалось прочитать внутри
- * приложения, — это библиотечный `SmartAppResources`. Всё остальное —
- * множественное наследование, цикл, исчерпанная глубина и класс, которого нет в
- * прочитанном модуле, — ошибка.
+ * `classes` — классы **приложения** от базы к производному; пустой массив
+ * значит, что активный класс библиотечный и приложение к нему ничего не
+ * добавило. Для ресурсов это «добавить нечего», для модели пользователя —
+ * основной случай (`USER = User`, либо `USER` не задан вовсе).
+ *
+ * `libraryBase` — точечное имя первой базы, которую не удалось прочитать внутри
+ * приложения: `scenarios.user.user_model.User`. `undefined` значит, что цепочка
+ * кончилась классом без базы.
  */
-function resolveChain(start: ClassRef, files: AppFiles): ChainEntry[] | undefined {
+export interface ChainResult {
+  readonly classes: ChainEntry[];
+  readonly libraryBase?: string;
+}
+
+/**
+ * Разрешает цепочку наследования от [start]. `undefined` — цепочка
+ * **недействительна**, то есть построить её не удалось: множественное
+ * наследование, цикл, исчерпанная глубина, класс, которого нет в прочитанном
+ * модуле, пропавший модуль приложения и база, которую не удалось сопоставить ни
+ * с импортом, ни с классом рядом. Частичная цепочка дала бы имена, которые
+ * нечем подтвердить.
+ *
+ * Нормальных концов два: база вне приложения (библиотечный класс — её имя
+ * уезжает в `libraryBase`) и класс без базы (`libraryBase` не задан). Пустой
+ * `classes` при заданном `libraryBase` — валидный результат: активный класс
+ * библиотечный.
+ */
+export function resolveChain(start: ClassRef, files: AppFiles): ChainResult | undefined {
   const chain: ChainEntry[] = [];
   const visited = new Set<string>();
   let current: ClassRef | undefined = start;
@@ -126,8 +154,11 @@ function resolveChain(start: ClassRef, files: AppFiles): ChainEntry[] | undefine
       // это наш модуль, которого не хватает: цепочку подтвердить нечем. Если
       // пакета нет — это библиотека (база фреймворка), и цепочка закончилась.
       const expectedInApp = files.exists(rootPackageOf(current.file));
-      if (expectedInApp || chain.length === 0) return undefined;
-      return finish(chain);
+      if (expectedInApp) return undefined;
+      // Пустая цепочка здесь — не отказ: значит, активный класс сам
+      // библиотечный. Ресурсы отобразят это в «добавить нечего», модели
+      // пользователя этого хватает, чтобы выбрать пол.
+      return { classes: finish(chain), libraryBase: dottedNameOf(current) };
     }
     const module = parseModule(text);
     const name: string = current.name;
@@ -145,12 +176,27 @@ function resolveChain(start: ClassRef, files: AppFiles): ChainEntry[] | undefine
     if (next === undefined) return undefined;
     current = next;
   }
-  return finish(chain);
+  // Класс без базы: цепочка кончилась, библиотечного пола у неё нет.
+  return { classes: finish(chain) };
 }
 
 /** Цепочка в порядке применения: от базы к производному. */
 function finish(chain: ChainEntry[]): ChainEntry[] {
   return [...chain].reverse();
+}
+
+/**
+ * Точечное имя класса: `scenarios/user/user_model.py` + `User` ->
+ * `scenarios.user.user_model.User`. Пакетная форма отдельного случая не
+ * требует: `ClassRef.file` всегда хранит `.py`-вариант, а `__init__.py`
+ * подставляет уже [readModule].
+ */
+function dottedNameOf(ref: ClassRef): string {
+  const module = ref.file.endsWith(resourceScan.fileExtension)
+    ? ref.file.slice(0, -resourceScan.fileExtension.length)
+    : ref.file;
+  const dotted = module.split("/").join(".");
+  return dotted.length === 0 ? ref.name : `${dotted}.${ref.name}`;
 }
 
 /** Текст модуля: сначала `a/b/c.py`, затем `a/b/c/__init__.py`. */
