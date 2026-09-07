@@ -16,7 +16,8 @@
     "fieldAccess",
     "jinja",
     "keywordRegistries",
-    "resourceScan"
+    "resourceScan",
+    "userModel"
   ],
   "definitions": {
     "kindName": {
@@ -54,7 +55,7 @@
           "const": true
         },
         "contractVersion": {
-          "const": 5
+          "const": 6
         },
         "note": {
           "type": "string",
@@ -270,12 +271,73 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "formVariable"
+        "formVariable",
+        "userVariableDefault"
       ],
       "properties": {
         "formVariable": {
           "type": "string",
           "minLength": 1
+        },
+        "userVariableDefault": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "userModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configVariable",
+        "defaultClass",
+        "fieldsProperty",
+        "fieldFactory",
+        "parametrizerVariable",
+        "parametrizerDefaultClass",
+        "parametrizerMethod",
+        "userValueExpression",
+        "blockerTokens",
+        "blockerConstructs"
+      ],
+      "properties": {
+        "configVariable": {
+          "type": "string",
+          "minLength": 1
+        },
+        "defaultClass": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fieldsProperty": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fieldFactory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parametrizerVariable": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parametrizerDefaultClass": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parametrizerMethod": {
+          "type": "string",
+          "minLength": 1
+        },
+        "userValueExpression": {
+          "type": "string",
+          "minLength": 1
+        },
+        "blockerTokens": {
+          "$ref": "#/definitions/nonEmptyStringArray"
+        },
+        "blockerConstructs": {
+          "$ref": "#/definitions/nonEmptyStringArray"
         }
       }
     },

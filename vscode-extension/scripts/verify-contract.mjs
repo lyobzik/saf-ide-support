@@ -58,6 +58,12 @@ const keywords = validate(
   join(sharedDir, "keywords", "keywords.json"),
 );
 
+const userFields = validate(
+  "user_fields.json",
+  join(sharedDir, "keywords", "user_fields.schema.json"),
+  join(sharedDir, "keywords", "user_fields.json"),
+);
+
 if (rules?._meta?.contractVersion !== EXPECTED_CONTRACT_VERSION) {
   failures.push(
     `contract version mismatch: rules.json has ${rules?._meta?.contractVersion}, ` +
@@ -70,6 +76,29 @@ if (categories.length === 0 || categories.every(([, values]) => values.length ==
   failures.push("keyword dictionary is empty — highlighting would be silently disabled");
 }
 
+// Пустой пол — это молча выключенная семантика модели пользователя: на типовом
+// приложении все имена приходят именно оттуда.
+const userClasses = Object.entries(userFields?.classes ?? {});
+if (userClasses.length === 0) {
+  failures.push("user model snapshot has no classes — user semantics would be silently disabled");
+}
+if (userClasses.every(([, spec]) => spec.fields.length === 0)) {
+  failures.push("user model snapshot declares no fields at all");
+}
+// Непустой снимок без класса по умолчанию — тот же молчаливый провал: у
+// типового приложения `USER` не задан или назначает его наследника.
+const defaultUserClass = rules?.userModel?.defaultClass;
+const defaultUserSpec =
+  defaultUserClass === undefined ? undefined : userFields?.classes?.[defaultUserClass];
+if (defaultUserClass !== undefined && defaultUserSpec === undefined) {
+  failures.push(`user model snapshot has no default class ${defaultUserClass}`);
+} else if (defaultUserSpec !== undefined && defaultUserSpec.fields.length === 0) {
+  // Наличия мало: пустой `fields` у класса по умолчанию — тот же потерянный
+  // пол, только проверку присутствия он проходит. У промежуточных классов
+  // (`Model`) пустой список законен, поэтому проверка адресная.
+  failures.push(`default user class ${defaultUserClass} declares no fields`);
+}
+
 if (failures.length > 0) {
   console.error("Contract verification failed:\n" + failures.join("\n"));
   process.exit(1);
@@ -78,5 +107,5 @@ if (failures.length > 0) {
 console.log(
   `Contract OK: version ${EXPECTED_CONTRACT_VERSION}, ` +
     `${rules.kinds.length} kinds, ${rules.refRules.length} ref rules, ` +
-    `${categories.length} keyword categories`,
+    `${categories.length} keyword categories, ${userClasses.length} user model classes`,
 );

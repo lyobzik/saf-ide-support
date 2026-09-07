@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SmartApp DSL user model snapshot",
+  "description": "Снимок полей и атрибутов модели пользователя фреймворка — пол, поверх которого работает половина приложения. Генерируется tools/generate_user_fields.py из вендоренных модулей.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "_meta",
+    "classes"
+  ],
+  "properties": {
+    "_meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generated",
+        "note",
+        "sources"
+      ],
+      "properties": {
+        "generated": {
+          "const": true
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "file",
+              "sha256"
+            ],
+            "properties": {
+              "file": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "classes": {
+      "description": "Точечное имя библиотечного класса -> его имена. Ключом служит то же значение, что резолвер цепочки отдаёт в libraryBase.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[^.]+(\\.[^.]+)+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fields",
+          "attributes",
+          "diagnosticsSafe"
+        ],
+        "properties": {
+          "fields": {
+            "description": "Имена, которые Model.__init__ раздаёт через setattr из списка fields. Отбрасываются, если класс приложения переопределил fields без super().",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "attributes": {
+            "description": "Прочие имена класса: присваивания self.x, def и имена уровня класса со значением. Свойством fields не управляются и отбрасыванию не подлежат.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "diagnosticsSafe": {
+            "description": "Решение, принятое при вендоринге: можно ли включать WARNING поверх этого пола. Не вычисляется гасителями — setattr в Model.__init__ погасил бы диагностику во всех приложениях сразу.",
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

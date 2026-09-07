@@ -108,8 +108,9 @@ intellijPlatform {
  */
 tasks.processResources {
     from(rootProject.layout.projectDirectory.dir("shared/keywords")) {
-        // Схема нужна только проверкам сборки/CI — в бандл плагина она не идёт.
+        // Схемы нужны только проверкам сборки/CI — в бандл плагина они не идут.
         include("keywords.json")
+        include("user_fields.json")
         into("keywords")
     }
 }

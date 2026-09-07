@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.sber.smartapp.dsl.SmartAppKeywords
 import ru.sber.smartapp.dsl.SmartAppRefKind
+import ru.sber.smartapp.dsl.resources.SmartAppUserFields
 import java.io.File
 
 /**
@@ -50,6 +51,44 @@ class SmartAppContractTest {
     }
 
     @Test
+    fun snapshotCarriesUserModelTableValues() {
+        // exportRules --check сверяет снимок с собственным выводом экспортёра и
+        // потому не заметит, что экспортёр положил не то значение (скажем,
+        // formVariable вместо userVariableDefault). Здесь снимок сверяется с
+        // самими таблицами.
+        val jinja = rulesJson().getAsJsonObject("jinja")
+        assertEquals(JinjaSpec.formVariable, jinja.get("formVariable").asString)
+        assertEquals(JinjaSpec.userVariableDefault, jinja.get("userVariableDefault").asString)
+
+        val userModel = rulesJson().getAsJsonObject("userModel")
+        assertEquals(UserModelSpec.configVariable, userModel.get("configVariable").asString)
+        assertEquals(UserModelSpec.defaultClass, userModel.get("defaultClass").asString)
+        assertEquals(UserModelSpec.fieldsProperty, userModel.get("fieldsProperty").asString)
+        assertEquals(UserModelSpec.fieldFactory, userModel.get("fieldFactory").asString)
+        assertEquals(
+            UserModelSpec.parametrizerVariable,
+            userModel.get("parametrizerVariable").asString,
+        )
+        assertEquals(
+            UserModelSpec.parametrizerDefaultClass,
+            userModel.get("parametrizerDefaultClass").asString,
+        )
+        assertEquals(UserModelSpec.parametrizerMethod, userModel.get("parametrizerMethod").asString)
+        assertEquals(
+            UserModelSpec.userValueExpression,
+            userModel.get("userValueExpression").asString,
+        )
+        assertEquals(
+            UserModelSpec.blockerTokens.toList(),
+            userModel.getAsJsonArray("blockerTokens").map { it.asString },
+        )
+        assertEquals(
+            UserModelSpec.blockerConstructs.toList(),
+            userModel.getAsJsonArray("blockerConstructs").map { it.asString },
+        )
+    }
+
+    @Test
     fun keywordDictionaryIsPresentAndNotEmpty() {
         assertTrue(
             "словарь ключевых слов не должен быть пустым — иначе подсветка молча отключена",
@@ -74,6 +113,48 @@ class SmartAppContractTest {
                 SmartAppKeywords.all(category),
             )
         }
+    }
+
+    @Test
+    fun userFieldSnapshotIsBundledAndMatchesShared() {
+        val shared = File(sharedDir, "keywords/user_fields.json")
+        assertTrue("снимок модели пользователя обязан лежать в shared/keywords/", shared.isFile)
+
+        val sharedClasses = JsonParser.parseString(shared.readText())
+            .asJsonObject.getAsJsonObject("classes")
+        assertTrue("снимок не должен быть пустым", sharedClasses.size() > 0)
+
+        for ((dotted, value) in sharedClasses.entrySet()) {
+            val spec = value.asJsonObject
+            val loaded = SmartAppUserFields.byClass[dotted]
+            assertEquals(
+                "класс '$dotted' обязан попасть в ресурсы плагина",
+                spec.getAsJsonArray("fields").map { it.asString }.toSet(),
+                loaded?.fields,
+            )
+            assertEquals(
+                "атрибуты '$dotted' обязаны совпадать с shared/",
+                spec.getAsJsonArray("attributes").map { it.asString }.toSet(),
+                loaded?.attributes,
+            )
+            assertEquals(spec.get("diagnosticsSafe").asBoolean, loaded?.diagnosticsSafe)
+        }
+    }
+
+    @Test
+    fun userFieldSnapshotCarriesLibraryFloor() {
+        // Пол — не абстракция: на типовом приложении именно отсюда приходят все
+        // имена, включая `variables` из примера задачи. Пустой или урезанный
+        // снимок молча выключил бы семантику модели пользователя.
+        val user = SmartAppUserFields.of(UserModelSpec.defaultClass)
+        assertTrue(
+            "класс по умолчанию '${UserModelSpec.defaultClass}' обязан быть в снимке",
+            user != null,
+        )
+        assertTrue("поле 'variables' обязано быть в полу", user!!.fields.contains("variables"))
+        assertTrue("поле 'forms' обязано быть в полу", user.fields.contains("forms"))
+        assertTrue("атрибут 'message' обязан быть в полу", user.attributes.contains("message"))
+        assertTrue("приватные имена в пол не попадают", user.attributes.none { it.startsWith("_") })
     }
 
     private fun rulesJson() =

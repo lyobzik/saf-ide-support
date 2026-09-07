@@ -27,7 +27,7 @@ object SmartAppContract {
      * (там версия описана как `const`) и `EXPECTED_CONTRACT_VERSION` в
      * TS-расширении — иначе проверки падают.
      */
-    const val VERSION: Int = 5
+    const val VERSION: Int = 6
 }
 
 /** Вид сущности и подкаталог `static/references/<dirName>/`, в котором он живёт. */
@@ -88,6 +88,105 @@ object FieldAccessSpec {
 object JinjaSpec {
     /** Переменная, через которую доступны поля целевой формы. */
     val formVariable: String = "main_form"
+
+    /**
+     * Имя, под которым доступна модель пользователя, — **значение по
+     * умолчанию**, а не гарантия. Фреймворк `user` в параметры шаблона не
+     * кладёт: их собирает `Parametrizer._get_user_data`, и `user` появляется
+     * только когда приложение дописывает его в своём параметризаторе. Пока
+     * привязка не доказана разбором (см. [UserModelSpec]), под этим именем
+     * работают предложения — автодополнение и переход, — но не утверждения:
+     * WARNING остаётся выключенным.
+     */
+    val userVariableDefault: String = "user"
+}
+
+/**
+ * Правила чтения модели пользователя приложения: какие имена доступны в Jinja
+ * как `user.<name>`.
+ *
+ * Устроено симметрично [ResourceScanSpec]: активный класс назначает
+ * `app_config.py`, атрибуты собираются по цепочке наследования, пол приходит из
+ * снимка фреймворка. Здесь только имена и раскладка (данные); разбор Python —
+ * алгоритм, он живёт в коде обеих реализаций.
+ */
+object UserModelSpec {
+
+    /** Переменная `app_config.py`, назначающая класс модели пользователя. */
+    const val configVariable: String = "USER"
+
+    /**
+     * Класс, который подставляет сам фреймворк, если `USER` не задан
+     * (`smart_kit/configs/__init__.py`: `set_default(app_config, "USER", User)`).
+     * Отсутствие `USER` — не «ничего не известно», а «работает один пол».
+     */
+    const val defaultClass: String = "scenarios.user.user_model.User"
+
+    /** Свойство класса, возвращающее список полей модели. */
+    const val fieldsProperty: String = "fields"
+
+    /**
+     * Вызов, первый позиционный аргумент которого — имя атрибута.
+     * Ровно эти имена `Model.__init__` раздаёт через `setattr`.
+     */
+    const val fieldFactory: String = "Field"
+
+    /** Переменная `app_config.py`, назначающая параметризатор. */
+    const val parametrizerVariable: String = "PARAMETRIZER"
+
+    /** Класс параметризатора по умолчанию — тот же `set_default`. */
+    const val parametrizerDefaultClass: String = "scenarios.user.parametrizer.Parametrizer"
+
+    /** Метод параметризатора, собирающий словарь параметров шаблона. */
+    const val parametrizerMethod: String = "_get_user_data"
+
+    /**
+     * Единственное значение, признаваемое доказательством привязки корневого
+     * имени к модели пользователя. Множества здесь быть не должно: `self._user`
+     * — атрибут самого фреймворка (`BasicParametrizer.__init__`), а любое
+     * второе имя уже догадка о коде приложения.
+     */
+    const val userValueExpression: String = "self._user"
+
+    /**
+     * Гасители диагностики — текстовые. Ищутся по **маскированному** тексту:
+     * упоминание в docstring или комментарии гасителем не является.
+     */
+    val blockerTokens: Set<String> = linkedSetOf(
+        "__getattr__",
+        "__getattribute__",
+        "__setattr__",
+        "__delattr__",
+        "__slots__",
+        "__dict__",
+        "setattr(",
+        "vars(",
+        "globals(",
+        "locals(",
+    )
+
+    /**
+     * Гасители диагностики — структурные. Отдельный список, потому что одним
+     * множеством строк они не выражаются: «dunder, кроме `__init__`» и
+     * «декоратор на самом классе» — не токены. Контракт фиксирует **состав и
+     * обязательность** проверок, реализация каждой остаётся кодом обеих сторон
+     * — тот же приём, что у `keywordRegistries`.
+     */
+    val blockerConstructs: Set<String> = linkedSetOf(
+        // определение dunder-метода, кроме __init__
+        "dunderDefExceptInit",
+        // декоратор на самом классе
+        "classDecorator",
+        // metaclass= в заголовке класса
+        "metaclassInBases",
+        // класс С БАЗОЙ, чей __init__ не вызывает super().__init__().
+        // Без оговорки про базу конструкт срабатывал бы на корневом классе
+        // (core.model.model.Model базы не имеет), а обоснование «базовые
+        // self.* не создаются» к безбазовому классу неприменимо.
+        "initWithoutSuper",
+        // fields в форме, которую сканер не разобрал
+        "unparsedFieldsProperty",
+    )
 }
 
 /** Данные для определения категории ключевых слов по контексту свойства `type`. */

@@ -63,6 +63,7 @@ object ExportRules {
         root.add("jinja", jinja())
         root.add("keywordRegistries", stringMap(SmartAppSpecs.keywordRegistries))
         root.add("resourceScan", resourceScan())
+        root.add("userModel", userModel())
         return GSON.toJson(root) + "\n"
     }
 
@@ -160,6 +161,20 @@ object ExportRules {
 
     private fun jinja(): JsonObject = JsonObject().apply {
         addProperty("formVariable", JinjaSpec.formVariable)
+        addProperty("userVariableDefault", JinjaSpec.userVariableDefault)
+    }
+
+    private fun userModel(): JsonObject = JsonObject().apply {
+        addProperty("configVariable", UserModelSpec.configVariable)
+        addProperty("defaultClass", UserModelSpec.defaultClass)
+        addProperty("fieldsProperty", UserModelSpec.fieldsProperty)
+        addProperty("fieldFactory", UserModelSpec.fieldFactory)
+        addProperty("parametrizerVariable", UserModelSpec.parametrizerVariable)
+        addProperty("parametrizerDefaultClass", UserModelSpec.parametrizerDefaultClass)
+        addProperty("parametrizerMethod", UserModelSpec.parametrizerMethod)
+        addProperty("userValueExpression", UserModelSpec.userValueExpression)
+        add("blockerTokens", strings(UserModelSpec.blockerTokens))
+        add("blockerConstructs", strings(UserModelSpec.blockerConstructs))
     }
 
     private fun strings(values: Iterable<String>): JsonArray =

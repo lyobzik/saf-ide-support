@@ -33,7 +33,8 @@ VITEST_REPORT=build/test-results/vitest.xml
 is_step() {
     case $1 in
         contract:keywords|contract:version|contract:schema|test:publish|\
-        test:idea|test:vscode|test:vscode:int|package:idea|package:vscode) return 0 ;;
+        test:generators|test:idea|test:vscode|test:vscode:int|\
+        package:idea|package:vscode) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -112,8 +113,9 @@ run_step() {
     echo "==> $step"
     case $step in
         contract:keywords)
-            # Словарь обязан соответствовать vendored-исходнику фреймворка.
+            # Оба снимка обязаны соответствовать vendored-исходникам фреймворка.
             python3 tools/generate_keywords.py --check
+            python3 tools/generate_user_fields.py --check
             ;;
         contract:version)
             # Версия живёт в двух манифестах и в имени тега; тег приходит
@@ -139,6 +141,21 @@ run_step() {
             status=0
             PYTHONPYCACHEPREFIX="$cache" \
                 python3 -m unittest discover -s tools/ci -p 'test_publish_*.py' || status=$?
+            rm -rf "$cache"
+            [ "$status" -eq 0 ] || exit "$status"
+            ;;
+        test:generators)
+            # Генераторы снимков на общей таблице входов и на синтетическом
+            # источнике. `--check` из contract:keywords этого не заменяет: он
+            # сверяет снимок с тем, что генератор породил сейчас, то есть
+            # неверный генератор породит и примет согласованный неверный снимок.
+            #
+            # Кэш байт-кода уводится в отдельный каталог — по той же причине,
+            # что в test:publish.
+            cache=$(mktemp -d)
+            status=0
+            PYTHONPYCACHEPREFIX="$cache" \
+                python3 -m unittest discover -s tools -p 'test_generate_*.py' || status=$?
             rm -rf "$cache"
             [ "$status" -eq 0 ] || exit "$status"
             ;;
