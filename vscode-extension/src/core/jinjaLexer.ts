@@ -1,4 +1,5 @@
 import { jinja } from "./contract";
+import { isIdentifierPart, isIdentifierStart } from "./identifiers";
 
 /**
  * Детерминированный лексер Jinja-фрагментов внутри строкового JSON-литерала.
@@ -49,6 +50,23 @@ export interface Token {
   readonly end: number;
 }
 
+/**
+ * Обращение к корневой переменной внутри выражения Jinja: сама переменная и —
+ * если за ней через точку стоит идентификатор — первый сегмент цепочки.
+ *
+ * Общий примитив: и семантика формы (`main_form.<field>`), и семантика модели
+ * пользователя (`user.<field>`) — фильтры поверх него по имени корня.
+ */
+export interface RootAccess {
+  readonly root: string;
+  readonly rootStart: number;
+  readonly rootEnd: number;
+  /** `undefined` — обращение к самой переменной, без первого сегмента. */
+  readonly member?: string;
+  readonly memberStart?: number;
+  readonly memberEnd?: number;
+}
+
 /** Кандидат на семантическую ссылку `<formVariable>.<field>` в интерполяции. */
 export interface FieldCandidate {
   readonly form: string;
@@ -71,12 +89,6 @@ interface OpenDelim {
 const token = (type: TokenType, start: number, end: number): Token => ({ type, start, end });
 
 const isWhitespace = (c: string): boolean => /\s/.test(c);
-
-// Класс идентификатора — часть грамматики, а не DSL-данные: держим в коде.
-// Соответствует Character.isJavaIdentifierStart/Part для практического набора
-// символов, встречающихся в именах полей и фильтров.
-const isIdentifierStart = (c: string): boolean => /[A-Za-z_$À-￿]/.test(c);
-const isIdentifierPart = (c: string): boolean => /[A-Za-z0-9_$À-￿]/.test(c);
 
 /** Токенизирует decoded-текст литерала. Возвращает упорядоченный список токенов. */
 export function tokenize(decodedText: string): Token[] {
@@ -130,18 +142,56 @@ export function tokenize(decodedText: string): Token[] {
  * сохраняется: переменная в позиции чужого поля (`variables.main_form.x`)
  * кандидата не даёт.
  */
-export function fieldCandidates(decodedText: string): FieldCandidate[] {
+export function rootAccesses(decodedText: string): RootAccess[] {
   const tokens = tokenize(decodedText);
-  const result: FieldCandidate[] = [];
+  const result: RootAccess[] = [];
 
-  let i = 0;
-  while (i < tokens.length) {
-    const type = tokens[i]?.type;
-    if (type !== TokenType.INTERP_OPEN && type !== TokenType.STATEMENT_OPEN) {
-      i++;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i] as Token;
+    // Корнем становится только VAR: идентификатор после `|` лексер помечает
+    // FILTER_NAME, и `{{ value | user }}` обращением к модели не является.
+    // Токены VAR существуют только внутри выражений — снаружи всё TEXT.
+    if (t.type !== TokenType.VAR) continue;
+    // Левая граница: переменная в позиции чужого поля (`variables.main_form.x`)
+    // корнем не считается.
+    const prev = neighborSkippingWhitespace(decodedText, tokens, i - 1, -1);
+    if (prev?.type === TokenType.DOT) continue;
+
+    const dotIdx = nextIndexSkippingWhitespace(decodedText, tokens, i + 1);
+    let member: Token | undefined;
+    if (dotIdx !== undefined && tokens[dotIdx]?.type === TokenType.DOT) {
+      const memberIdx = nextIndexSkippingWhitespace(decodedText, tokens, dotIdx + 1);
+      member = memberIdx === undefined ? undefined : tokens[memberIdx];
+    }
+
+    const root = decodedText.slice(t.start, t.end);
+    if (member?.type === TokenType.VAR) {
+      result.push({
+        root,
+        rootStart: t.start,
+        rootEnd: t.end,
+        member: decodedText.slice(member.start, member.end),
+        memberStart: member.start,
+        memberEnd: member.end,
+      });
       continue;
     }
-    i = collectFromExpr(decodedText, tokens, i, result);
+    result.push({ root, rootStart: t.start, rootEnd: t.end });
+  }
+  return result;
+}
+
+export function fieldCandidates(decodedText: string): FieldCandidate[] {
+  const result: FieldCandidate[] = [];
+  for (const access of rootAccesses(decodedText)) {
+    if (access.root !== jinja.formVariable) continue;
+    if (access.member === undefined) continue;
+    result.push({
+      form: access.root,
+      field: access.member,
+      fieldStart: access.memberStart as number,
+      fieldEnd: access.memberEnd as number,
+    });
   }
   return result;
 }
@@ -155,18 +205,9 @@ export function fieldCandidates(decodedText: string): FieldCandidate[] {
  * указывает на форму.
  */
 export function formVariableOccurrences(decodedText: string): { start: number; end: number }[] {
-  const tokens = tokenize(decodedText);
-  const result: { start: number; end: number }[] = [];
-
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i] as Token;
-    if (t.type !== TokenType.VAR) continue;
-    if (decodedText.slice(t.start, t.end) !== jinja.formVariable) continue;
-    const prev = neighborSkippingWhitespace(decodedText, tokens, i - 1, -1);
-    if (prev?.type === TokenType.DOT) continue;
-    result.push({ start: t.start, end: t.end });
-  }
-  return result;
+  return rootAccesses(decodedText)
+    .filter((access) => access.root === jinja.formVariable)
+    .map((access) => ({ start: access.rootStart, end: access.rootEnd }));
 }
 
 /** Токенизирует тело выражения — диапазон (from, until) без разделителей. */
@@ -237,57 +278,6 @@ function tokenizeExpr(text: string, from: number, until: number, out: Token[]): 
     out.push(token(TokenType.TEXT, start, i));
     afterFilter = false;
   }
-}
-
-/**
- * Собирает кандидатов из одного выражения, начатого токеном [openIdx] (`{{`
- * или `{%`). Возвращает индекс, с которого продолжать обход.
- */
-function collectFromExpr(
-  text: string,
-  tokens: readonly Token[],
-  openIdx: number,
-  result: FieldCandidate[],
-): number {
-  let j = openIdx + 1;
-
-  while (j < tokens.length) {
-    const t = tokens[j] as Token;
-    if (t.type === TokenType.INTERP_CLOSE || t.type === TokenType.STATEMENT_CLOSE) return j + 1;
-    // Вложенных выражений быть не может, но на малформированном входе
-    // открывающий разделитель встретиться способен — отдаём его наружу.
-    if (t.type === TokenType.INTERP_OPEN || t.type === TokenType.STATEMENT_OPEN) return j;
-
-    if (t.type === TokenType.VAR && text.slice(t.start, t.end) === jinja.formVariable) {
-      // Левая граница: переменная в позиции чужого поля (variables.main_form.x)
-      // — не наша семантика.
-      const prev = neighborSkippingWhitespace(text, tokens, j - 1, -1);
-      if (prev?.type === TokenType.DOT) {
-        j++;
-        continue;
-      }
-      const dotIdx = nextIndexSkippingWhitespace(text, tokens, j + 1);
-      const dot = dotIdx === undefined ? undefined : tokens[dotIdx];
-      const fieldIdx =
-        dot?.type === TokenType.DOT
-          ? nextIndexSkippingWhitespace(text, tokens, (dotIdx as number) + 1)
-          : undefined;
-      const field = fieldIdx === undefined ? undefined : tokens[fieldIdx];
-
-      if (field?.type === TokenType.VAR) {
-        result.push({
-          form: jinja.formVariable,
-          field: text.slice(field.start, field.end),
-          fieldStart: field.start,
-          fieldEnd: field.end,
-        });
-        j = (fieldIdx as number) + 1;
-        continue;
-      }
-    }
-    j++;
-  }
-  return j;
 }
 
 /**

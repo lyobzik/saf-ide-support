@@ -61,6 +61,21 @@ data class SmartAppJinjaToken(val type: SmartAppJinjaTokenType, val range: TextR
 data class SmartAppFieldCandidate(val form: String, val field: String, val fieldRange: TextRange)
 
 /**
+ * Обращение к корневой переменной внутри выражения Jinja: сама переменная и —
+ * если за ней через точку стоит идентификатор — первый сегмент цепочки.
+ *
+ * Общий примитив: и семантика формы (`main_form.<field>`), и семантика модели
+ * пользователя (`user.<field>`) — фильтры поверх него по имени корня.
+ * [member] и [memberRange] равны `null`, когда за переменной сегмента нет.
+ */
+data class SmartAppRootAccess(
+    val root: String,
+    val rootRange: TextRange,
+    val member: String?,
+    val memberRange: TextRange?,
+)
+
+/**
  * Детерминированный лексер Jinja-фрагментов внутри строкового JSON-литерала.
  *
  * **Не полноценный Jinja-парсер**, а токенизатор для двух целей:
@@ -126,17 +141,54 @@ object SmartAppJinjaLexer {
      * сохраняется: `main_form` в позиции чужого поля (`variables.main_form.x`)
      * кандидата не даёт. Кандидаты возвращаются в порядке встречи.
      */
-    fun fieldCandidates(decodedText: String): List<SmartAppFieldCandidate> {
+    fun fieldCandidates(decodedText: String): List<SmartAppFieldCandidate> =
+        rootAccesses(decodedText)
+            .filter { it.root == JinjaSpec.formVariable && it.member != null }
+            .map { SmartAppFieldCandidate(it.root, it.member!!, it.memberRange!!) }
+
+    /**
+     * Обращения к корневым переменным внутри выражений Jinja — и интерполяций
+     * `{{ … }}`, и statement-тегов `{% … %}`.
+     *
+     * Корнем становится **только** токен [VAR]: идентификатор сразу после `|`
+     * лексер помечает [FILTER_NAME], поэтому `{{ value | user }}` — применение
+     * фильтра, а не обращение к модели. Токены [VAR] существуют только внутри
+     * выражений: снаружи всё [TEXT].
+     *
+     * Левая граница: переменная в позиции чужого сегмента
+     * (`variables.main_form.x`) корнем не считается. Сегментом берётся
+     * **первый** идентификатор после точки — у хвоста цепочки семантики нет.
+     * Ключевые слова Jinja лексеру неизвестны, поэтому `if` в `{% if x %}` —
+     * такой же корень без сегмента; отсеивают их потребители по имени корня.
+     */
+    fun rootAccesses(decodedText: String): List<SmartAppRootAccess> {
         val tokens = tokenize(decodedText)
-        val result = ArrayList<SmartAppFieldCandidate>()
-        var i = 0
-        while (i < tokens.size) {
-            val type = tokens[i].type
-            if (type != INTERP_OPEN && type != STATEMENT_OPEN) {
-                i++
-                continue
+        val result = ArrayList<SmartAppRootAccess>()
+        for (i in tokens.indices) {
+            val t = tokens[i]
+            if (t.type != VAR) continue
+            val prev = neighborSkippingWhitespace(decodedText, tokens, i - 1, -1)
+            if (prev != null && prev.type == DOT) continue
+
+            val dot = nextSkippingWhitespace(decodedText, tokens, i + 1)
+            val member = if (dot != null && dot.type == DOT) {
+                nextSkippingWhitespace(decodedText, tokens, tokens.indexOf(dot) + 1)
+            } else {
+                null
             }
-            i = collectFromExpr(decodedText, tokens, i, result)
+            val root = decodedText.substring(t.range.startOffset, t.range.endOffset)
+            if (member != null && member.type == VAR) {
+                result.add(
+                    SmartAppRootAccess(
+                        root = root,
+                        rootRange = t.range,
+                        member = decodedText.substring(member.range.startOffset, member.range.endOffset),
+                        memberRange = member.range,
+                    ),
+                )
+            } else {
+                result.add(SmartAppRootAccess(root, t.range, member = null, memberRange = null))
+            }
         }
         return result
     }
@@ -149,20 +201,10 @@ object SmartAppJinjaLexer {
      * В отличие от кандидатов, следующая за переменной точка не обязательна:
      * `{{ main_form }}` тоже указывает на форму.
      */
-    fun formVariableRanges(decodedText: String): List<TextRange> {
-        val tokens = tokenize(decodedText)
-        val result = ArrayList<TextRange>()
-        for (i in tokens.indices) {
-            val t = tokens[i]
-            if (t.type != VAR) continue
-            val text = decodedText.substring(t.range.startOffset, t.range.endOffset)
-            if (text != JinjaSpec.formVariable) continue
-            val prev = neighborSkippingWhitespace(decodedText, tokens, i - 1, -1)
-            if (prev != null && prev.type == DOT) continue
-            result.add(t.range)
-        }
-        return result
-    }
+    fun formVariableRanges(decodedText: String): List<TextRange> =
+        rootAccesses(decodedText)
+            .filter { it.root == JinjaSpec.formVariable }
+            .map { it.rootRange }
 
     /** Токенизирует тело выражения — диапазон (from, until) без разделителей. */
     private fun tokenizeExpr(text: String, from: Int, until: Int, out: ArrayList<SmartAppJinjaToken>) {
@@ -206,10 +248,10 @@ object SmartAppJinjaLexer {
                     out.add(token(STRING, start, i))
                     afterFilter = false
                 }
-                c.isJavaIdentifierStart() -> {
+                SmartAppIdentifiers.isIdentifierStart(c) -> {
                     val start = i
                     i++
-                    while (i < until && text[i].isJavaIdentifierPart()) i++
+                    while (i < until && SmartAppIdentifiers.isIdentifierPart(text[i])) i++
                     out.add(token(if (afterFilter) FILTER_NAME else VAR, start, i))
                     afterFilter = false
                 }
@@ -220,7 +262,7 @@ object SmartAppJinjaLexer {
                     while (i < until && !text[i].isWhitespace() &&
                         text[i] != '.' && text[i] != '|' &&
                         text[i] != '"' && text[i] != '\'' &&
-                        !text[i].isJavaIdentifierStart()
+                        !SmartAppIdentifiers.isIdentifierStart(text[i])
                     ) {
                         i++
                     }
@@ -229,51 +271,6 @@ object SmartAppJinjaLexer {
                 }
             }
         }
-    }
-
-    /**
-     * Собирает кандидатов из одного выражения, начатого токеном [openIdx]
-     * (`{{` или `{%`). Возвращает индекс, с которого продолжать обход: одно
-     * выражение может содержать несколько вхождений `main_form.<field>`, а
-     * литерал — несколько выражений.
-     */
-    private fun collectFromExpr(
-        text: String,
-        tokens: List<SmartAppJinjaToken>,
-        openIdx: Int,
-        result: MutableList<SmartAppFieldCandidate>,
-    ): Int {
-        var j = openIdx + 1
-        while (j < tokens.size) {
-            val t = tokens[j]
-            if (t.type == INTERP_CLOSE || t.type == STATEMENT_CLOSE) return j + 1
-            // Вложенных выражений быть не может, но на малформированном входе
-            // открывающий разделитель встретиться способен — отдаём его наружу.
-            if (t.type == INTERP_OPEN || t.type == STATEMENT_OPEN) return j
-            if (t.type == VAR &&
-                text.substring(t.range.startOffset, t.range.endOffset) == JinjaSpec.formVariable
-            ) {
-                // Левая граница: main_form в позиции чужого поля
-                // (variables.main_form.x) — не наша семантика, пропускаем.
-                val prev = neighborSkippingWhitespace(text, tokens, j - 1, -1)
-                if (prev != null && prev.type == DOT) {
-                    j++
-                    continue
-                }
-                val dot = nextSkippingWhitespace(text, tokens, j + 1)
-                val field = if (dot != null && dot.type == DOT)
-                    nextSkippingWhitespace(text, tokens, tokens.indexOf(dot) + 1) else null
-                if (field != null && field.type == VAR) {
-                    val fieldIdx = tokens.indexOf(field)
-                    val fieldName = text.substring(field.range.startOffset, field.range.endOffset)
-                    result.add(SmartAppFieldCandidate(JinjaSpec.formVariable, fieldName, field.range))
-                    j = fieldIdx + 1
-                    continue
-                }
-            }
-            j++
-        }
-        return j
     }
 
     /**

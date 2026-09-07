@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { decode } from "../../src/core/jsonDecode";
-import { fieldCandidates, formVariableOccurrences, tokenize, TokenType } from "../../src/core/jinjaLexer";
+import {
+  fieldCandidates,
+  formVariableOccurrences,
+  rootAccesses,
+  tokenize,
+  TokenType,
+} from "../../src/core/jinjaLexer";
 
 /**
  * Порт `SmartAppJinjaLexerTest.kt` — кейс в кейс. Лексер Jinja самая тонкая часть
@@ -209,5 +215,84 @@ describe("fieldCandidates", () => {
 
   it("операндная позиция кандидата даёт", () => {
     expect(fieldCandidates("{{ x + main_form.name }}").map((c) => c.field)).toEqual(["name"]);
+  });
+});
+
+describe("rootAccesses", () => {
+  it("отдаёт корень и первый сегмент", () => {
+    expect(rootAccesses("{{ user.variables.smart_geo }}")).toEqual([
+      { root: "user", rootStart: 3, rootEnd: 7, member: "variables", memberStart: 8, memberEnd: 17 },
+    ]);
+  });
+
+  it("обращение без точки даёт корень без сегмента", () => {
+    const access = rootAccesses("{{ user }}")[0];
+    expect(access?.root).toBe("user");
+    expect(access?.member).toBeUndefined();
+  });
+
+  it("корнем становится любое имя, не только переменная формы", () => {
+    // Ключевые слова Jinja лексеру неизвестны, поэтому `if` — такой же VAR и
+    // такой же корень без сегмента. Отсеивают их потребители по имени корня.
+    expect(rootAccesses("{{ a.x }} {% if b.y %}").map((r) => `${r.root}.${r.member}`)).toEqual([
+      "a.x",
+      "if.undefined",
+      "b.y",
+    ]);
+  });
+
+  it("имя фильтра корнем не становится", () => {
+    // `{{ value | user }}` — применение фильтра с таким именем, а не обращение
+    // к модели: лексер помечает идентификатор после `|` как FILTER_NAME.
+    expect(rootAccesses("{{ value | user }}").map((r) => r.root)).toEqual(["value"]);
+  });
+
+  it("внутри аргумента фильтра обращение распознаётся", () => {
+    expect(rootAccesses("{{ value | default(user.field) }}").map((r) => `${r.root}.${r.member}`))
+      .toEqual(["value.undefined", "user.field"]);
+  });
+
+  it("левая граница: сегмент чужого объекта корнем не становится", () => {
+    expect(rootAccesses("{{ variables.user.x }}").map((r) => `${r.root}.${r.member}`)).toEqual([
+      "variables.user",
+    ]);
+  });
+});
+
+describe("грамматика идентификатора в лексере", () => {
+  const memberAfterDot = (text: string) => {
+    const tokens = tokenize(text);
+    const dot = tokens.findIndex((t) => t.type === TokenType.DOT);
+    const next = tokens[dot + 1];
+    return next === undefined ? undefined : { type: next.type, text: text.slice(next.start, next.end) };
+  };
+
+  it("кириллическое имя — VAR", () => {
+    expect(memberAfterDot("{{ user.я }}")).toEqual({ type: TokenType.VAR, text: "я" });
+  });
+
+  it("цифра в продолжении имени допустима", () => {
+    expect(memberAfterDot("{{ user.имя9 }}")).toEqual({ type: TokenType.VAR, text: "имя9" });
+  });
+
+  it("Nd не может начинать имя", () => {
+    expect(memberAfterDot("{{ user.٣ }}")).toEqual({ type: TokenType.TEXT, text: "٣" });
+  });
+
+  it("категория No именем не является", () => {
+    expect(memberAfterDot("{{ user.² }}")).toEqual({ type: TokenType.TEXT, text: "²" });
+  });
+
+  it("категория Sm именем не является", () => {
+    expect(memberAfterDot("{{ user.× }}")).toEqual({ type: TokenType.TEXT, text: "×" });
+  });
+
+  it("символ вне BMP именем не является целиком", () => {
+    // Обе UTF-16-единицы суррогатной пары уходят в один TEXT: ограничение BMP
+    // и введено ради того, чтобы результат не зависел от способа обхода.
+    expect(memberAfterDot("{{ user.\u{10400} }}")).toEqual({
+      type: TokenType.TEXT,
+      text: "\u{10400}",
+    });
   });
 });

@@ -263,4 +263,105 @@ class SmartAppJinjaLexerTest {
             }
         }
     }
+
+    // --- rootAccesses: общий примитив под семантику формы и модели пользователя ---
+
+    @Test
+    fun testRootAccessGivesRootAndFirstSegment() {
+        val accesses = SmartAppJinjaLexer.rootAccesses("{{ user.variables.smart_geo }}")
+        assertEquals(1, accesses.size)
+        val access = accesses[0]
+        assertEquals("user", access.root)
+        assertEquals(TextRange(3, 7), access.rootRange)
+        assertEquals("variables", access.member)
+        assertEquals(TextRange(8, 17), access.memberRange)
+    }
+
+    @Test
+    fun testRootAccessWithoutDotHasNoMember() {
+        val access = SmartAppJinjaLexer.rootAccesses("{{ user }}").single()
+        assertEquals("user", access.root)
+        assertEquals(null, access.member)
+        assertEquals(null, access.memberRange)
+    }
+
+    @Test
+    fun testRootAccessIsNotLimitedToFormVariable() {
+        // Ключевые слова Jinja лексеру неизвестны, поэтому `if` — такой же
+        // корень без сегмента; отсеивают их потребители по имени корня.
+        val text = "{{ a.x }} {% if b.y %}"
+        assertEquals(
+            listOf("a.x", "if.null", "b.y"),
+            SmartAppJinjaLexer.rootAccesses(text).map { "${it.root}.${it.member}" },
+        )
+    }
+
+    @Test
+    fun testFilterNameIsNotRoot() {
+        // `{{ value | user }}` — применение фильтра с таким именем, а не
+        // обращение к модели: идентификатор после `|` помечен FILTER_NAME.
+        assertEquals(
+            listOf("value"),
+            SmartAppJinjaLexer.rootAccesses("{{ value | user }}").map { it.root },
+        )
+    }
+
+    @Test
+    fun testRootAccessInsideFilterArgument() {
+        assertEquals(
+            listOf("value.null", "user.field"),
+            SmartAppJinjaLexer.rootAccesses("{{ value | default(user.field) }}")
+                .map { "${it.root}.${it.member}" },
+        )
+    }
+
+    @Test
+    fun testRootAccessRespectsLeftBoundary() {
+        assertEquals(
+            listOf("variables.user"),
+            SmartAppJinjaLexer.rootAccesses("{{ variables.user.x }}").map { "${it.root}.${it.member}" },
+        )
+    }
+
+    // --- грамматика идентификатора внутри самого лексера ---
+
+    private fun memberAfterDot(text: String): Pair<SmartAppJinjaTokenType, String> {
+        val tokens = SmartAppJinjaLexer.tokenize(text)
+        val dot = tokens.indexOfFirst { it.type == DOT }
+        assertTrue("в '$text' нет точки", dot >= 0)
+        val next = tokens[dot + 1]
+        return next.type to text.substring(next.range.startOffset, next.range.endOffset)
+    }
+
+    @Test
+    fun testCyrillicNameIsVar() {
+        assertEquals(VAR to "я", memberAfterDot("{{ user.я }}"))
+    }
+
+    @Test
+    fun testDigitContinuesName() {
+        assertEquals(VAR to "имя9", memberAfterDot("{{ user.имя9 }}"))
+    }
+
+    @Test
+    fun testDecimalDigitCannotStartName() {
+        assertEquals(TEXT to "٣", memberAfterDot("{{ user.٣ }}"))
+    }
+
+    @Test
+    fun testOtherNumberCategoryIsNotName() {
+        assertEquals(TEXT to "²", memberAfterDot("{{ user.² }}"))
+    }
+
+    @Test
+    fun testMathSymbolIsNotName() {
+        assertEquals(TEXT to "×", memberAfterDot("{{ user.× }}"))
+    }
+
+    @Test
+    fun testSupplementaryCharacterIsNotName() {
+        // Обе UTF-16-единицы суррогатной пары уходят в один TEXT: ограничение
+        // BMP и введено ради того, чтобы результат не зависел от способа обхода.
+        assertEquals(TEXT to "\uD801\uDC00", memberAfterDot("{{ user.\uD801\uDC00 }}"))
+    }
 }

@@ -1,0 +1,33 @@
+{
+  "_meta": {
+    "note": "Общая таблица входов для предиката адресуемости имён. Читается тремя сторонами: тестами плагина IDEA, тестами ядра расширения и тестом генератора снимка. Одна копия вместо трёх: три расходятся быстрее двух.",
+    "grammar": "start = '_' | категория L* (Lu Ll Lt Lm Lo); part = start | категория Nd; только BMP (U+0000..U+FFFF)",
+    "columns": {
+      "addressable": "имя целиком разбирается как один идентификатор — годится в качестве корневого имени",
+      "field": "годится как имя поля модели пользователя: addressable и без ведущего '_'"
+    }
+  },
+  "names": [
+    { "input": "ok", "addressable": true, "field": true, "why": "ASCII-идентификатор" },
+    { "input": "_u", "addressable": true, "field": false, "why": "ведущее подчёркивание: корнем быть может, полем нет" },
+    { "input": "USER_DB_VERSION", "addressable": true, "field": true, "why": "цифр нет, регистр не важен" },
+    { "input": "я", "addressable": true, "field": true, "why": "U+044F, категория Ll" },
+    { "input": "имя9", "addressable": true, "field": true, "why": "Nd допустим как продолжение" },
+    { "input": "", "addressable": false, "field": false, "why": "пустая строка" },
+    { "input": "9", "addressable": false, "field": false, "why": "цифра не может быть началом" },
+    { "input": "9lives", "addressable": false, "field": false, "why": "цифра не может быть началом" },
+    { "input": "$", "addressable": false, "field": false, "why": "в Java идентификатор, в нашей грамматике нет" },
+    { "input": "foo-bar", "addressable": false, "field": false, "why": "дефис не часть идентификатора" },
+    { "input": "foo.bar", "addressable": false, "field": false, "why": "точка разделяет сегменты" },
+    { "input": "٣", "addressable": false, "field": false, "why": "U+0663, категория Nd: продолжение, но не начало" },
+    { "input": "x٣", "addressable": true, "field": true, "why": "Nd в продолжении допустим и вне ASCII" },
+    { "input": "x²", "addressable": false, "field": false, "why": "U+00B2 в продолжении: категория No, не Nd. Различает категории и удобные методы платформ — Python str.isdigit() принимает этот символ" },
+    { "input": "x①", "addressable": false, "field": false, "why": "U+2460 в продолжении: тоже No и тоже принимается str.isdigit()" },
+    { "input": "²", "addressable": false, "field": false, "why": "U+00B2, категория No (не Nd и не буква)" },
+    { "input": "×", "addressable": false, "field": false, "why": "U+00D7, категория Sm" },
+    { "input": "÷", "addressable": false, "field": false, "why": "U+00F7, категория Sm" },
+    { "input": "¡", "addressable": false, "field": false, "why": "U+00A1, категория Po" },
+    { "input": "𐐀", "addressable": false, "field": false, "why": "U+10400 вне BMP: суррогатная пара идентификатором не является" },
+    { "input": "\ud800", "addressable": false, "field": false, "why": "одиночный суррогат" }
+  ]
+}
