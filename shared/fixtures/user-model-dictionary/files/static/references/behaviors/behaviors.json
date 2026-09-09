@@ -1,0 +1,7 @@
+{
+  "greeting": {
+    "type": "answer",
+    "text": "Гео: {{ user.my_field }}",
+    "unknown": "{{ user.nope }}"
+  }
+}

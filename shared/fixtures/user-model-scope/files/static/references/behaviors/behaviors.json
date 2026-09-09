@@ -1,0 +1,6 @@
+{
+  "in_behaviors": {
+    "type": "answer",
+    "text": "{{ user.smart_geo }}"
+  }
+}

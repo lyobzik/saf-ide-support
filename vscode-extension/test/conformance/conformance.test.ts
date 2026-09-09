@@ -48,6 +48,17 @@ interface Expected {
     file: string;
     items: readonly { category: string; name: string; registration: TargetSpec }[];
   }[];
+  /**
+   * Словарь модели пользователя целиком: приложение задаётся любым его
+   * DSL-файлом. Сравнение полное — лишнее имя обязано ронять кейс.
+   */
+  readonly userFields?: readonly {
+    file: string;
+    enabled: boolean;
+    rootVariables: readonly string[];
+    diagnosticsEnabled: boolean;
+    items: readonly { origin: string; name: string; declaration?: TargetSpec }[];
+  }[];
   readonly definitions?: readonly {
     file: string;
     anchor: string;
@@ -216,6 +227,7 @@ const fixtures = loadFixtures();
 const SUPPORTED_SECTIONS = new Set([
   "description",
   "customKeywords",
+  "userFields",
   "definitions",
   "references",
   "diagnostics",
@@ -279,6 +291,85 @@ describe("conformance-корпус", () => {
                 : { ...item, registration: matching(item.registration, expectation.registration) };
             }),
           ).toEqual(expectedItems);
+        });
+      }
+
+      for (const check of fixture.expected.userFields ?? []) {
+        it(`userFields: ${check.file}`, () => {
+          const scopeRoot = contextFor(check.file).scopeRoot;
+          const appRoot = applicationRootOf(scopeRoot as string);
+          const model = index.userModelOf(scopeRoot);
+          const root = index.userRootOf(scopeRoot);
+
+          expect(model !== undefined, "собран ли словарь").toBe(check.enabled);
+          expect(root?.names ?? [], "корневые имена").toEqual([...check.rootVariables]);
+          expect(
+            model?.diagnosticsSafe === true && root?.state === "proven",
+            "разрешён ли WARNING",
+          ).toBe(check.diagnosticsEnabled);
+
+          // Запись на каждое объявление: у имени, объявленного дважды разными
+          // формами, записей две. У имени из снимка объявления нет вовсе, и
+          // фикстура обязана это описывать, а не умалчивать.
+          interface Item {
+            origin: string;
+            name: string;
+            declaration?: Described;
+          }
+          const actual: Item[] = [...(model?.attributes.values() ?? [])].flatMap((attribute) =>
+            attribute.declarations.length === 0
+              ? [{ origin: "snapshot", name: attribute.name }]
+              : attribute.declarations.map((site) => ({
+                  origin: site.origin,
+                  name: attribute.name,
+                  declaration: describeLocation(fixture, {
+                    uri: index.registrationUri(appRoot, site.file) ?? "",
+                    start: site.nameStart,
+                    end: site.nameEnd,
+                  }),
+                })),
+          );
+          const expectedItems: Item[] = check.items.map((item) => {
+            expect(
+              item.declaration === undefined,
+              `у записи '${item.name}' origin='${item.origin}' declaration ` +
+                "обязан быть ровно у не-snapshot",
+            ).toBe(item.origin === "snapshot");
+            return item.declaration === undefined
+              ? { origin: item.origin, name: item.name }
+              : {
+                  origin: item.origin,
+                  name: item.name,
+                  declaration: expectedDescribed(fixture, item.declaration),
+                };
+          });
+
+          // Порядок задаёт резолвер, контракт фиксирует состав.
+          const sortKey = (item: { origin: string; name: string; declaration?: Described }) =>
+            `${item.name}:${item.origin}:${item.declaration?.file ?? ""}:` +
+            `${String(item.declaration?.line ?? 0).padStart(4, "0")}:` +
+            `${String(item.declaration?.column ?? 0).padStart(4, "0")}`;
+          const sorted = [...actual].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+          const sortedExpected = [...expectedItems].sort((a, b) =>
+            sortKey(a).localeCompare(sortKey(b)),
+          );
+          expect(
+            sorted.map((item, position) => {
+              const expectation = sortedExpected[position];
+              return expectation?.declaration === undefined || item.declaration === undefined
+                ? item
+                : {
+                    ...item,
+                    // Значение пришло из describeLocation, поэтому column у него
+                    // есть всегда; `matching` снимает его, если фикстура столбец
+                    // не задавала.
+                    declaration: matching(
+                      item.declaration as Required<Described>,
+                      expectation.declaration,
+                    ),
+                  };
+            }),
+          ).toEqual(sortedExpected);
         });
       }
 

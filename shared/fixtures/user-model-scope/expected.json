@@ -1,0 +1,312 @@
+{
+  "description": "Модель пользователя во всех шести видах DSL-файлов: переход, вхождения и изоляция приложений; рядом продолжает работать main_form",
+  "userFields": [
+    {
+      "file": "static/references/behaviors/behaviors.json",
+      "enabled": true,
+      "rootVariables": [
+        "user"
+      ],
+      "diagnosticsEnabled": true,
+      "items": [
+        {
+          "origin": "def",
+          "name": "fields",
+          "declaration": {
+            "file": "app/user/user.py",
+            "line": 5,
+            "column": 8,
+            "rangeText": "fields"
+          }
+        },
+        {
+          "origin": "snapshot",
+          "name": "get_field"
+        },
+        {
+          "origin": "snapshot",
+          "name": "raw"
+        },
+        {
+          "origin": "field",
+          "name": "smart_geo",
+          "declaration": {
+            "file": "app/user/user.py",
+            "line": 6,
+            "column": 40,
+            "rangeText": "smart_geo"
+          }
+        }
+      ]
+    },
+    {
+      "file": "subapp/static/references/behaviors/behaviors.json",
+      "enabled": true,
+      "rootVariables": [
+        "user"
+      ],
+      "diagnosticsEnabled": false,
+      "items": [
+        {
+          "origin": "def",
+          "name": "fields",
+          "declaration": {
+            "file": "subapp/app/user/user.py",
+            "line": 5,
+            "column": 8,
+            "rangeText": "fields"
+          }
+        },
+        {
+          "origin": "snapshot",
+          "name": "get_field"
+        },
+        {
+          "origin": "snapshot",
+          "name": "raw"
+        },
+        {
+          "origin": "field",
+          "name": "smart_geo",
+          "declaration": {
+            "file": "subapp/app/user/user.py",
+            "line": 6,
+            "column": 40,
+            "rangeText": "smart_geo"
+          }
+        }
+      ]
+    }
+  ],
+  "definitions": [
+    {
+      "file": "static/references/actions/actions.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "app/user/user.py",
+          "line": 6,
+          "column": 40,
+          "rangeText": "smart_geo"
+        }
+      ]
+    },
+    {
+      "file": "static/references/behaviors/behaviors.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "app/user/user.py",
+          "line": 6,
+          "column": 40,
+          "rangeText": "smart_geo"
+        }
+      ]
+    },
+    {
+      "file": "static/references/classifiers/classifiers.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "app/user/user.py",
+          "line": 6,
+          "column": 40,
+          "rangeText": "smart_geo"
+        }
+      ]
+    },
+    {
+      "file": "static/references/field_fillers/field_fillers.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "app/user/user.py",
+          "line": 6,
+          "column": 40,
+          "rangeText": "smart_geo"
+        }
+      ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "app/user/user.py",
+          "line": 6,
+          "column": 40,
+          "rangeText": "smart_geo"
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "app/user/user.py",
+          "line": 6,
+          "column": 40,
+          "rangeText": "smart_geo"
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "default(user.smart_geo",
+      "anchorOffset": 13,
+      "targets": [
+        {
+          "file": "app/user/user.py",
+          "line": 6,
+          "column": 40,
+          "rangeText": "smart_geo"
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "value | user }}",
+      "anchorOffset": 8,
+      "targets": []
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "main_form.name",
+      "anchorOffset": 10,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "line": 4,
+          "rangeText": "\"name\""
+        }
+      ]
+    },
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "main_form.greeting",
+      "anchorOffset": 10,
+      "targets": [
+        {
+          "file": "static/references/forms/forms.json",
+          "line": 5,
+          "rangeText": "\"greeting\""
+        }
+      ]
+    },
+    {
+      "file": "subapp/static/references/behaviors/behaviors.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "subapp/app/user/user.py",
+          "line": 6,
+          "column": 40,
+          "rangeText": "smart_geo"
+        }
+      ]
+    }
+  ],
+  "references": [
+    {
+      "file": "static/references/behaviors/behaviors.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "static/references/actions/actions.json",
+          "line": 3,
+          "column": 21,
+          "rangeText": "smart_geo"
+        },
+        {
+          "file": "static/references/behaviors/behaviors.json",
+          "line": 3,
+          "column": 21,
+          "rangeText": "smart_geo"
+        },
+        {
+          "file": "static/references/classifiers/classifiers.json",
+          "line": 3,
+          "column": 21,
+          "rangeText": "smart_geo"
+        },
+        {
+          "file": "static/references/field_fillers/field_fillers.json",
+          "line": 3,
+          "column": 21,
+          "rangeText": "smart_geo"
+        },
+        {
+          "file": "static/references/forms/forms.json",
+          "line": 7,
+          "column": 21,
+          "rangeText": "smart_geo"
+        },
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 3,
+          "column": 21,
+          "rangeText": "smart_geo"
+        },
+        {
+          "file": "static/references/scenarios/main.json",
+          "line": 5,
+          "column": 39,
+          "rangeText": "smart_geo"
+        },
+        {
+          "file": "static/references/forms/forms.json",
+          "line": 5,
+          "column": 27,
+          "rangeText": "smart_geo"
+        }
+      ]
+    },
+    {
+      "file": "static/references/forms/forms.json",
+      "anchor": "\"greeting\": \"{{ user",
+      "targets": [],
+      "anchorOffset": 16
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "items": []
+    },
+    {
+      "file": "static/references/behaviors/behaviors.json",
+      "items": []
+    },
+    {
+      "file": "static/references/actions/actions.json",
+      "items": [
+        {
+          "message": "Не удаётся разрешить поле 'nope' модели пользователя",
+          "line": 4,
+          "rangeText": "nope"
+        }
+      ]
+    }
+  ],
+  "completion": [
+    {
+      "file": "static/references/scenarios/main.json",
+      "anchor": "value | user }}",
+      "anchorOffset": 12,
+      "items": [],
+      "absent": [
+        "smart_geo",
+        "user"
+      ]
+    }
+  ]
+}

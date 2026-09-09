@@ -1,0 +1,8 @@
+{
+  "in_scenarios": {
+    "form": "hello_form",
+    "text": "{{ user.smart_geo }} и {{ main_form.name }} и {{ main_form.greeting }}",
+    "filter": "{{ value | user }}",
+    "nested": "{{ value | default(user.smart_geo) }}"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "b": {
+    "one": "{{ user.smart_geo }}",
+    "two": "{{ me.smart_geo }}",
+    "bad": "{{ user.nope }}"
+  }
+}

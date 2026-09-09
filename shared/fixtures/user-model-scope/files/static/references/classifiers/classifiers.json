@@ -1,0 +1,6 @@
+{
+  "in_classifiers": {
+    "type": "answer",
+    "text": "{{ user.smart_geo }}"
+  }
+}

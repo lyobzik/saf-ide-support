@@ -1,0 +1,189 @@
+{
+  "description": "Словарь модели пользователя: пол снимка, имена приложения, дубль имени, фильтр приватных, аннотации; переход, диагностика и автодополнение по нему",
+  "userFields": [
+    {
+      "file": "static/references/behaviors/behaviors.json",
+      "enabled": true,
+      "rootVariables": [
+        "user"
+      ],
+      "diagnosticsEnabled": true,
+      "items": [
+        {
+          "origin": "class",
+          "name": "LIMIT",
+          "declaration": {
+            "file": "app/user/user.py",
+            "line": 4,
+            "column": 4,
+            "rangeText": "LIMIT"
+          }
+        },
+        {
+          "origin": "def",
+          "name": "fields",
+          "declaration": {
+            "file": "app/user/user.py",
+            "line": 8,
+            "column": 8,
+            "rangeText": "fields"
+          }
+        },
+        {
+          "origin": "snapshot",
+          "name": "get_field"
+        },
+        {
+          "origin": "def",
+          "name": "helper",
+          "declaration": {
+            "file": "app/user/user.py",
+            "line": 17,
+            "column": 8,
+            "rangeText": "helper"
+          }
+        },
+        {
+          "origin": "self",
+          "name": "my_field",
+          "declaration": {
+            "file": "app/user/user.py",
+            "line": 14,
+            "column": 13,
+            "rangeText": "my_field"
+          }
+        },
+        {
+          "origin": "field",
+          "name": "my_field",
+          "declaration": {
+            "file": "app/user/user.py",
+            "line": 9,
+            "column": 40,
+            "rangeText": "my_field"
+          }
+        },
+        {
+          "origin": "snapshot",
+          "name": "raw"
+        },
+        {
+          "origin": "self",
+          "name": "tag",
+          "declaration": {
+            "file": "app/user/user.py",
+            "line": 13,
+            "column": 13,
+            "rangeText": "tag"
+          }
+        }
+      ]
+    }
+  ],
+  "definitions": [
+    {
+      "file": "static/references/behaviors/behaviors.json",
+      "anchor": "user.my_field",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "app/user/user.py",
+          "line": 9,
+          "column": 40,
+          "rangeText": "my_field"
+        },
+        {
+          "file": "app/user/user.py",
+          "line": 14,
+          "column": 13,
+          "rangeText": "my_field"
+        }
+      ]
+    },
+    {
+      "file": "static/references/behaviors/behaviors.json",
+      "anchor": "user.my_field",
+      "targets": [
+        {
+          "file": "app/user/user.py",
+          "line": 3,
+          "column": 6,
+          "rangeText": "CustomUser"
+        }
+      ]
+    }
+  ],
+  "references": [
+    {
+      "file": "static/references/behaviors/behaviors.json",
+      "anchor": "user.my_field",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "static/references/behaviors/behaviors.json",
+          "line": 3,
+          "column": 26,
+          "rangeText": "my_field"
+        }
+      ]
+    },
+    {
+      "file": "static/references/behaviors/behaviors.json",
+      "anchor": "user.my_field",
+      "anchorOffset": 5,
+      "includeDeclaration": true,
+      "targets": [
+        {
+          "file": "static/references/behaviors/behaviors.json",
+          "line": 3,
+          "column": 26,
+          "rangeText": "my_field"
+        },
+        {
+          "file": "app/user/user.py",
+          "line": 14,
+          "column": 13,
+          "rangeText": "my_field"
+        },
+        {
+          "file": "app/user/user.py",
+          "line": 9,
+          "column": 40,
+          "rangeText": "my_field"
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "static/references/behaviors/behaviors.json",
+      "items": [
+        {
+          "message": "Не удаётся разрешить поле 'nope' модели пользователя",
+          "line": 4,
+          "rangeText": "nope"
+        }
+      ]
+    }
+  ],
+  "completion": [
+    {
+      "file": "static/references/behaviors/behaviors.json",
+      "anchor": "user.my_field",
+      "anchorOffset": 5,
+      "kind": "user_field",
+      "items": [
+        "my_field",
+        "LIMIT",
+        "tag",
+        "helper",
+        "raw",
+        "get_field"
+      ],
+      "absent": [
+        "_private",
+        "variables"
+      ]
+    }
+  ]
+}

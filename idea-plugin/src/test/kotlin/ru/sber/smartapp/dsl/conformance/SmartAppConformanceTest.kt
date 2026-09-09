@@ -9,6 +9,7 @@ import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiPolyVariantReference
+import com.intellij.psi.PsiReference
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.codeInsight.CodeInsightSettings
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -20,9 +21,16 @@ import ru.sber.smartapp.dsl.highlight.SmartAppTextAttributes
 import ru.sber.smartapp.dsl.index.SmartAppNameIndex
 import ru.sber.smartapp.dsl.findusages.SmartAppCustomKeywordTargets
 import ru.sber.smartapp.dsl.resources.SmartAppCustomKeywords
+import ru.sber.smartapp.dsl.resources.SmartAppResourceScanner
+import ru.sber.smartapp.dsl.resources.SmartAppUserFieldElement
+import ru.sber.smartapp.dsl.resources.SmartAppUserModel
+import ru.sber.smartapp.dsl.resources.SmartAppUserRoot
+import ru.sber.smartapp.dsl.resources.SmartAppUserRootResolver
 import ru.sber.smartapp.dsl.reference.SmartAppCustomKeywordReference
 import ru.sber.smartapp.dsl.reference.SmartAppFieldReference
 import ru.sber.smartapp.dsl.reference.SmartAppReference
+import ru.sber.smartapp.dsl.reference.SmartAppUserFieldReference
+import ru.sber.smartapp.dsl.reference.SmartAppUserVariableReference
 import java.io.File
 
 /**
@@ -128,6 +136,92 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
         }
     }
 
+    /**
+     * Словарь модели пользователя целиком: состав имён, их объявления,
+     * корневые имена и право на диагностику. Приложение задаётся любым его
+     * DSL-файлом — каретка для этой секции не нужна.
+     */
+    fun testUserFields() {
+        forEachCheck("userFields") { fixture, check ->
+            val path = check["file"].asString
+            val file = psiFile(fixture, path)
+            val model = SmartAppUserModel.of(file)
+            val root = SmartAppUserRoot.of(file)
+            val where = "'${fixture.name}' для $path"
+
+            assertEquals("собран ли словарь $where", check["enabled"].asBoolean, model != null)
+            assertEquals(
+                "корневые имена $where",
+                check.getAsJsonArray("rootVariables").map { it.asString },
+                root?.names.orEmpty(),
+            )
+            assertEquals(
+                "разрешён ли WARNING $where",
+                check["diagnosticsEnabled"].asBoolean,
+                model?.diagnosticsSafe == true &&
+                    root?.state == SmartAppUserRootResolver.RootState.PROVEN,
+            )
+
+            // Запись на каждое объявление: у имени, объявленного дважды разными
+            // формами, записей две. У имени из снимка объявления нет вовсе.
+            val actual = model?.attributes.orEmpty().values.flatMap { attribute ->
+                val declarations = SmartAppUserModel.declarations(file, attribute.name)
+                if (declarations.isEmpty()) {
+                    listOf(UserFieldItem("snapshot", attribute.name, null))
+                } else {
+                    declarations.map {
+                        UserFieldItem(originName(it.site.origin), attribute.name, describe(fixture, it))
+                    }
+                }
+            }
+            val expected = check.getAsJsonArray("items").map { it.asJsonObject }.map {
+                val origin = it["origin"].asString
+                val declaration = it.getAsJsonObject("declaration")
+                assertEquals(
+                    "у записи '${it["name"].asString}' origin='$origin' declaration " +
+                        "обязан быть ровно у не-snapshot",
+                    origin != "snapshot",
+                    declaration != null,
+                )
+                UserFieldItem(
+                    origin = origin,
+                    name = it["name"].asString,
+                    declaration = declaration?.let { site -> expectedDescribed(fixture, site) },
+                )
+            }
+
+            // Порядок задаёт резолвер, контракт фиксирует состав.
+            val order = compareBy<UserFieldItem>(
+                { it.name }, { it.origin }, { it.declaration?.file ?: "" },
+                { it.declaration?.line ?: 0 }, { it.declaration?.column ?: 0 },
+            )
+            val sorted = actual.sortedWith(order)
+            val sortedExpected = expected.sortedWith(order)
+            val aligned = sorted.mapIndexed { index, item ->
+                val expectation = sortedExpected.getOrNull(index)?.declaration
+                if (expectation == null || item.declaration == null) {
+                    item
+                } else {
+                    item.copy(declaration = matching(item.declaration, expectation))
+                }
+            }
+            assertEquals("словарь модели пользователя $where", sortedExpected, aligned)
+        }
+    }
+
+    /**
+     * Имя вида объявления в корпусе. Совпадает с написанием в ядре расширения
+     * (`DeclarationOrigin`), поэтому `CLASS_LEVEL` переводится в `class`, а не
+     * печатается как есть.
+     */
+    private fun originName(origin: SmartAppResourceScanner.DeclarationOrigin): String =
+        when (origin) {
+            SmartAppResourceScanner.DeclarationOrigin.FIELD -> "field"
+            SmartAppResourceScanner.DeclarationOrigin.SELF -> "self"
+            SmartAppResourceScanner.DeclarationOrigin.DEF -> "def"
+            SmartAppResourceScanner.DeclarationOrigin.CLASS_LEVEL -> "class"
+        }
+
     fun testDefinitions() {
         forEachCheck("definitions") { fixture, check ->
             val path = check["file"].asString
@@ -170,12 +264,31 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
             val offset = anchorOffset(text, check)
             val file = psiFile(fixture, path)
 
-            // Каретка в корпусе стоит на определении: сущности или поля формы.
-            val definition = PsiTreeUtil.findElementOfClassAtOffset(
-                file, offset, JsonProperty::class.java, false,
-            ) ?: error("под кареткой нет определения в '${fixture.name}/$path'")
+            // Каретка стоит либо на определении (сущность, поле формы, значение
+            // `type`), либо на обращении к модели пользователя внутри Jinja.
+            // Второй случай решает **наличие ссылки**, а не её результат: у
+            // корневой переменной цель — класс, и вхождений у него нет вовсе, а
+            // у имени из снимка ссылка не разрешается ни во что. Откат на
+            // объемлющее свойство в обоих случаях подменял бы цель молча —
+            // раннер проверял бы `"text": …` вместо того, что под кареткой.
+            val userReference = referencesAt(file, offset).firstOrNull {
+                it is SmartAppUserFieldReference || it is SmartAppUserVariableReference
+            }
+            val userField = if (userReference == null) {
+                emptyList()
+            } else {
+                resolveAt(file, offset).filterIsInstance<SmartAppUserFieldElement>()
+            }
+            val definition: PsiElement? = if (userReference != null) {
+                userField.firstOrNull()
+            } else {
+                PsiTreeUtil.findElementOfClassAtOffset(file, offset, JsonProperty::class.java, false)
+                    ?: error("под кареткой нет определения в '${fixture.name}/$path'")
+            }
 
-            val usages = myFixture.findUsages(definition)
+            // Цели нет — значит нет и вхождений: платформа в такой позиции
+            // Find Usages не предлагает.
+            val usages = if (definition == null) emptyList() else myFixture.findUsages(definition)
                 // Платформа подмешивает к результатам своё: текстовые вхождения
                 // слова по всему проекту и одноимённые JSON-ключи из других файлов
                 // (их приносит JsonPropertyNameReference самого JSON-плагина).
@@ -193,7 +306,7 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
                 .map { expectedDescribed(fixture, it.asJsonObject) }
                 .sortedWith(compareBy({ it.file }, { it.line }, { it.column ?: 0 }, { it.rangeText }))
             val declaration =
-                if (includeDeclaration) declarationsOf(fixture, definition) else emptyList()
+                if (includeDeclaration) declarationsOf(fixture, definition, userField) else emptyList()
             val actual = (usages + declaration)
                 .sortedWith(compareBy({ it.file }, { it.line }, { it.column ?: 0 }, { it.rangeText }))
                 .mapIndexed { index, described ->
@@ -491,19 +604,25 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
         }
     }
 
-    /** Определения, на которые ведёт позиция [offset]. */
-    private fun resolveAt(file: PsiFile, offset: Int): List<PsiElement> {
+    /**
+     * Ссылки литерала, чей диапазон покрывает каретку.
+     *
+     * Ссылок у литерала может быть несколько — по одной на каждое вхождение
+     * внутри Jinja. Берутся только накрывающие каретку: иначе кейс отвечал бы
+     * за весь литерал целиком и не различал два вхождения в разных
+     * интерполяциях.
+     */
+    private fun referencesAt(file: PsiFile, offset: Int): List<PsiReference> {
         val literal = PsiTreeUtil.findElementOfClassAtOffset(
             file, offset, JsonStringLiteral::class.java, false,
         ) ?: return emptyList()
-
-        // Ссылок у литерала может быть несколько — по одной на каждое вхождение
-        // поля в Jinja. Резолвим только ту, чей диапазон покрывает каретку:
-        // иначе кейс отвечал бы за весь литерал целиком и не различал два
-        // вхождения в разных интерполяциях.
         val inElement = offset - literal.textRange.startOffset
-        return literal.references
-            .filter { it.rangeInElement.containsOffset(inElement) }
+        return literal.references.filter { it.rangeInElement.containsOffset(inElement) }
+    }
+
+    /** Определения, на которые ведёт позиция [offset]. */
+    private fun resolveAt(file: PsiFile, offset: Int): List<PsiElement> {
+        return referencesAt(file, offset)
             .flatMap { reference ->
                 when (reference) {
                     is PsiPolyVariantReference -> reference.multiResolve(false).mapNotNull { it.element }
@@ -585,7 +704,8 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
         return element.references.any { reference ->
             val ours = reference is SmartAppReference ||
                 reference is SmartAppFieldReference ||
-                reference is SmartAppCustomKeywordReference
+                reference is SmartAppCustomKeywordReference ||
+                reference is SmartAppUserFieldReference
             ours && (range == null || reference.rangeInElement == range)
         }
     }
@@ -622,13 +742,23 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
     }
 
     /**
-     * Объявления цели под кареткой. У определения DSL это оно само, а у слова,
-     * зарегистрированного приложением, — строки регистрации в Python: то же
-     * самое отдаёт при `includeDeclaration` ядро расширения, и корпус обязан
-     * видеть с обеих сторон один список.
+     * Объявления цели для `includeDeclaration`.
+     *
+     * Три случая: атрибут модели пользователя — все строки его объявления (тот
+     * же список, что отдаёт переход); слово приложения — все его действующие
+     * регистрации; определение DSL — оно само.
      */
-    private fun declarationsOf(fixture: Fixture, definition: JsonProperty): List<Described> {
-        val registrations = SmartAppCustomKeywordTargets.of(definition)?.declarations
+    private fun declarationsOf(
+        fixture: Fixture,
+        definition: PsiElement?,
+        userField: List<SmartAppUserFieldElement>,
+    ): List<Described> {
+        // У атрибута модели объявлений может быть несколько — берутся все, тот
+        // же список, что отдаёт переход.
+        if (userField.isNotEmpty()) return userField.map { describe(fixture, it) }
+        if (definition == null) return emptyList()
+        val registrations = (definition as? JsonProperty)
+            ?.let { SmartAppCustomKeywordTargets.of(it)?.declarations }
         if (registrations != null) return registrations.map { describe(fixture, it) }
         return listOf(describe(fixture, definition))
     }
@@ -704,6 +834,13 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
         val rangeText: String,
     )
 
+    /** Имя модели пользователя вместе с местом одного его объявления. */
+    private data class UserFieldItem(
+        val origin: String,
+        val name: String,
+        val declaration: Described?,
+    )
+
     /** Слово приложения вместе с местом его действующей регистрации. */
     private data class CustomKeywordItem(
         val category: String,
@@ -755,6 +892,7 @@ class SmartAppConformanceTest : BasePlatformTestCase() {
         val SUPPORTED_SECTIONS = setOf(
             "description",
             "customKeywords",
+            "userFields",
             "definitions",
             "references",
             "diagnostics",

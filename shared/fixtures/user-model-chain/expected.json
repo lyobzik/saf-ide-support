@@ -1,0 +1,324 @@
+{
+  "description": "Состояния цепочки USER: база вне снимка, недействительная цепочка, гаситель в классе приложения, библиотечный активный класс",
+  "userFields": [
+    {
+      "file": "app_unknown_base/static/references/behaviors/behaviors.json",
+      "enabled": true,
+      "rootVariables": [
+        "user"
+      ],
+      "diagnosticsEnabled": false,
+      "items": [
+        {
+          "origin": "self",
+          "name": "smart_geo",
+          "declaration": {
+            "file": "app_unknown_base/app/user/user.py",
+            "line": 6,
+            "column": 13,
+            "rangeText": "smart_geo"
+          }
+        }
+      ]
+    },
+    {
+      "file": "app_invalid_chain/static/references/behaviors/behaviors.json",
+      "enabled": false,
+      "rootVariables": [
+        "user"
+      ],
+      "diagnosticsEnabled": false,
+      "items": []
+    },
+    {
+      "file": "app_blocker/static/references/behaviors/behaviors.json",
+      "enabled": true,
+      "rootVariables": [
+        "user"
+      ],
+      "diagnosticsEnabled": false,
+      "items": [
+        {
+          "origin": "def",
+          "name": "fields",
+          "declaration": {
+            "file": "app_blocker/app/user/user.py",
+            "line": 5,
+            "column": 8,
+            "rangeText": "fields"
+          }
+        },
+        {
+          "origin": "snapshot",
+          "name": "get_field"
+        },
+        {
+          "origin": "snapshot",
+          "name": "raw"
+        },
+        {
+          "origin": "field",
+          "name": "smart_geo",
+          "declaration": {
+            "file": "app_blocker/app/user/user.py",
+            "line": 6,
+            "column": 40,
+            "rangeText": "smart_geo"
+          }
+        }
+      ]
+    },
+    {
+      "file": "app_library/static/references/behaviors/behaviors.json",
+      "enabled": true,
+      "rootVariables": [
+        "user"
+      ],
+      "diagnosticsEnabled": true,
+      "items": [
+        {
+          "origin": "snapshot",
+          "name": "USER_DB_VERSION"
+        },
+        {
+          "origin": "snapshot",
+          "name": "behaviors"
+        },
+        {
+          "origin": "snapshot",
+          "name": "counters"
+        },
+        {
+          "origin": "snapshot",
+          "name": "descriptions"
+        },
+        {
+          "origin": "snapshot",
+          "name": "do_not_save"
+        },
+        {
+          "origin": "snapshot",
+          "name": "expire"
+        },
+        {
+          "origin": "snapshot",
+          "name": "fields"
+        },
+        {
+          "origin": "snapshot",
+          "name": "forms"
+        },
+        {
+          "origin": "snapshot",
+          "name": "gender_selector"
+        },
+        {
+          "origin": "snapshot",
+          "name": "get_field"
+        },
+        {
+          "origin": "snapshot",
+          "name": "history"
+        },
+        {
+          "origin": "snapshot",
+          "name": "id"
+        },
+        {
+          "origin": "snapshot",
+          "name": "initial_db_data"
+        },
+        {
+          "origin": "snapshot",
+          "name": "last_action_ids"
+        },
+        {
+          "origin": "snapshot",
+          "name": "last_fields"
+        },
+        {
+          "origin": "snapshot",
+          "name": "last_messages_ids"
+        },
+        {
+          "origin": "snapshot",
+          "name": "last_scenarios"
+        },
+        {
+          "origin": "snapshot",
+          "name": "load_error"
+        },
+        {
+          "origin": "snapshot",
+          "name": "local_vars"
+        },
+        {
+          "origin": "snapshot",
+          "name": "message"
+        },
+        {
+          "origin": "snapshot",
+          "name": "message_vars"
+        },
+        {
+          "origin": "snapshot",
+          "name": "mid_variables"
+        },
+        {
+          "origin": "snapshot",
+          "name": "parametrizer"
+        },
+        {
+          "origin": "snapshot",
+          "name": "preprocessing_messages_for_scenarios"
+        },
+        {
+          "origin": "snapshot",
+          "name": "private_vars"
+        },
+        {
+          "origin": "snapshot",
+          "name": "raw"
+        },
+        {
+          "origin": "snapshot",
+          "name": "raw_str"
+        },
+        {
+          "origin": "snapshot",
+          "name": "scenario_models"
+        },
+        {
+          "origin": "snapshot",
+          "name": "settings"
+        },
+        {
+          "origin": "snapshot",
+          "name": "variables"
+        }
+      ]
+    }
+  ],
+  "definitions": [
+    {
+      "file": "app_unknown_base/static/references/behaviors/behaviors.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "app_unknown_base/app/user/user.py",
+          "line": 6,
+          "column": 13,
+          "rangeText": "smart_geo"
+        }
+      ]
+    },
+    {
+      "file": "app_invalid_chain/static/references/behaviors/behaviors.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": []
+    },
+    {
+      "file": "app_blocker/static/references/behaviors/behaviors.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": [
+        {
+          "file": "app_blocker/app/user/user.py",
+          "line": 6,
+          "column": 40,
+          "rangeText": "smart_geo"
+        }
+      ]
+    },
+    {
+      "file": "app_library/static/references/behaviors/behaviors.json",
+      "anchor": "user.smart_geo",
+      "targets": []
+    },
+    {
+      "file": "app_library/static/references/behaviors/behaviors.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "targets": []
+    },
+    {
+      "file": "app_library/static/references/behaviors/behaviors.json",
+      "anchor": "user.variables.smart_geo",
+      "anchorOffset": 15,
+      "targets": []
+    },
+    {
+      "file": "app_library/static/references/behaviors/behaviors.json",
+      "anchor": "variables.user.x",
+      "anchorOffset": 10,
+      "targets": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "app_unknown_base/static/references/behaviors/behaviors.json",
+      "items": []
+    },
+    {
+      "file": "app_invalid_chain/static/references/behaviors/behaviors.json",
+      "items": []
+    },
+    {
+      "file": "app_blocker/static/references/behaviors/behaviors.json",
+      "items": []
+    },
+    {
+      "file": "app_library/static/references/behaviors/behaviors.json",
+      "items": [
+        {
+          "message": "Не удаётся разрешить поле 'smart_geo' модели пользователя",
+          "line": 2,
+          "rangeText": "smart_geo"
+        },
+        {
+          "message": "Не удаётся разрешить поле 'nope' модели пользователя",
+          "line": 3,
+          "rangeText": "nope"
+        }
+      ]
+    }
+  ],
+  "completion": [
+    {
+      "file": "app_library/static/references/behaviors/behaviors.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "kind": "user_field",
+      "items": [
+        "variables",
+        "message",
+        "forms"
+      ],
+      "absent": [
+        "smart_geo",
+        "_private"
+      ]
+    },
+    {
+      "file": "app_invalid_chain/static/references/behaviors/behaviors.json",
+      "anchor": "user.smart_geo",
+      "anchorOffset": 5,
+      "items": [],
+      "absent": [
+        "smart_geo"
+      ]
+    },
+    {
+      "file": "app_library/static/references/behaviors/behaviors.json",
+      "anchor": "user.variables.smart_geo",
+      "anchorOffset": 15,
+      "items": [],
+      "absent": [
+        "smart_geo",
+        "variables"
+      ]
+    }
+  ]
+}

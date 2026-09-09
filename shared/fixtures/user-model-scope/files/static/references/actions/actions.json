@@ -1,0 +1,7 @@
+{
+  "in_actions": {
+    "type": "answer",
+    "text": "{{ user.smart_geo }}",
+    "bad": "{{ user.nope }}"
+  }
+}

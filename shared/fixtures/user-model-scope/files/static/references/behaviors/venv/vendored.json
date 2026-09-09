@@ -1,0 +1,5 @@
+{
+  "vendored": {
+    "text": "{{ user.smart_geo }}"
+  }
+}

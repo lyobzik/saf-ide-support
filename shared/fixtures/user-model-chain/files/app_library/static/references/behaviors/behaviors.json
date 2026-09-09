@@ -1,0 +1,8 @@
+{
+  "b": {
+    "one": "{{ user.smart_geo }}",
+    "bad": "{{ user.nope }}",
+    "chain": "{{ user.variables.smart_geo }}",
+    "foreign": "{{ variables.user.x }}"
+  }
+}

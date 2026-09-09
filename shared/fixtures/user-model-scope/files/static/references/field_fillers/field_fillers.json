@@ -1,0 +1,6 @@
+{
+  "in_field_fillers": {
+    "type": "answer",
+    "text": "{{ user.smart_geo }}"
+  }
+}

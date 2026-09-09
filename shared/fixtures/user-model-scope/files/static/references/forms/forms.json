@@ -1,0 +1,10 @@
+{
+  "hello_form": {
+    "type": "form",
+    "fields": {
+      "name": { "type": "question" },
+      "greeting": "{{ user.smart_geo }}"
+    },
+    "text": "{{ user.smart_geo }}"
+  }
+}
