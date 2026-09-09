@@ -138,28 +138,36 @@ object SmartAppCustomKeywords {
     private val REFERENCES_PATH: String = PathSpec.rootSegments.joinToString("/")
 
     private fun compute(project: Project, appRoot: VirtualFile): List<CustomKeyword> =
-        SmartAppResourceResolver.customKeywords(
-            object : SmartAppResourceResolver.AppFiles {
-                override fun read(relativePath: String): String? {
-                    val file = appRoot.findFileByRelativePath(relativePath) ?: return null
-                    if (file.isDirectory || !ownedBy(file, appRoot)) return null
-                    return readText(project, file)
-                }
+        SmartAppResourceResolver.customKeywords(appFiles(project, appRoot))
 
-                /**
-                 * Модуль или пакет приложения: файл `<path>.py` либо хотя бы один
-                 * `.py` внутри каталога `<path>`. Тот же ответ обязана давать
-                 * реализация в ядре расширения — иначе «пропавший модуль» и
-                 * «библиотечная база» поменяются местами.
-                 */
-                override fun exists(path: String): Boolean {
-                    val module = appRoot.findFileByRelativePath(path + ResourceScanSpec.fileExtension)
-                    if (module != null && !module.isDirectory && ownedBy(module, appRoot)) return true
-                    val directory = appRoot.findFileByRelativePath(path) ?: return false
-                    return directory.isDirectory && containsOwnedModule(directory, appRoot)
-                }
-            },
-        )
+    /**
+     * Доступ к файлам приложения по VFS: правила владения, исключённые каталоги
+     * и чтение из документа редактора.
+     *
+     * Общий для ресурсов и для модели пользователя — вторая копия разошлась бы
+     * незаметно: например, одна читала бы несохранённый текст, а другая диск.
+     */
+    fun appFiles(project: Project, appRoot: VirtualFile): SmartAppResourceResolver.AppFiles =
+        object : SmartAppResourceResolver.AppFiles {
+            override fun read(relativePath: String): String? {
+                val file = appRoot.findFileByRelativePath(relativePath) ?: return null
+                if (file.isDirectory || !ownedBy(file, appRoot)) return null
+                return readText(project, file)
+            }
+
+            /**
+             * Модуль или пакет приложения: файл `<path>.py` либо хотя бы один
+             * `.py` внутри каталога `<path>`. Тот же ответ обязана давать
+             * реализация в ядре расширения — иначе «пропавший модуль» и
+             * «библиотечная база» поменяются местами.
+             */
+            override fun exists(path: String): Boolean {
+                val module = appRoot.findFileByRelativePath(path + ResourceScanSpec.fileExtension)
+                if (module != null && !module.isDirectory && ownedBy(module, appRoot)) return true
+                val directory = appRoot.findFileByRelativePath(path) ?: return false
+                return directory.isDirectory && containsOwnedModule(directory, appRoot)
+            }
+        }
 
     /**
      * Файл принадлежит именно этому приложению: ближайший корень с

@@ -186,6 +186,9 @@ object UserModelSpec {
         "initWithoutSuper",
         // fields в форме, которую сканер не разобрал
         "unparsedFieldsProperty",
+        // определение метода внутри условного блока класса: переопределение
+        // есть, но действует ли оно — неизвестно
+        "conditionalDef",
     )
 }
 

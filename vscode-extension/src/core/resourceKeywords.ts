@@ -93,7 +93,9 @@ export function classRefOf(
     return imported === undefined ? undefined : { file: modulePath(imported), name };
   }
   // Класс объявлен в самом файле, который мы уже разобрали.
-  return module.classes.some((cls) => cls.name === value) ? { file: moduleFile, name: value } : undefined;
+  return module.classes.some((cls) => cls.name === value)
+    ? { file: moduleFile, name: value }
+    : undefined;
 }
 
 /** `a.b.c` -> `a/b/c.py`; пакетный вариант пробует [readModule]. */
@@ -162,7 +164,11 @@ export function resolveChain(start: ClassRef, files: AppFiles): ChainResult | un
     }
     const module = parseModule(text);
     const name: string = current.name;
-    const cls: PyClass | undefined = module.classes.find((candidate) => candidate.name === name);
+    // Побеждает **последнее** объявление: так работает Python. `find` вернул бы
+    // первое, и модуль с двумя одноимёнными классами дал бы не тот словарь.
+    const cls: PyClass | undefined = module.classes
+      .filter((candidate) => candidate.name === name)
+      .at(-1);
     if (cls === undefined) return undefined;
 
     chain.push({ cls, file: current.file });

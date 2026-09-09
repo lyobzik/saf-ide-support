@@ -144,7 +144,9 @@ object SmartAppResourceResolver {
                 return ChainResult(chain.asReversed().toList(), dottedNameOf(ref))
             }
             val module = SmartAppResourceScanner.parseModule(text)
-            val cls = module.classes.firstOrNull { it.name == ref.name } ?: return null
+            // Побеждает **последнее** объявление: так работает Python. Первое
+            // вернуло бы не тот класс в модуле с двумя одноимёнными.
+            val cls = module.classes.lastOrNull { it.name == ref.name } ?: return null
 
             chain.add(ChainEntry(cls, ref.file))
             if (cls.bases.size > 1) return null
