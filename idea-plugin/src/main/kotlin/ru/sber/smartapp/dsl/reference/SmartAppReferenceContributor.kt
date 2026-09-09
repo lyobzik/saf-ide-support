@@ -11,6 +11,7 @@ import com.intellij.psi.PsiReferenceRegistrar
 import com.intellij.util.ProcessingContext
 import ru.sber.smartapp.dsl.SmartAppFiles
 import ru.sber.smartapp.dsl.reference.JsonStringLiteralDecoder.rawText
+import ru.sber.smartapp.dsl.resources.SmartAppUserRoot
 
 /**
  * Навешивает ссылки на строковые JSON-литералы в ссылочной позиции SmartApp:
@@ -21,6 +22,8 @@ import ru.sber.smartapp.dsl.reference.JsonStringLiteralDecoder.rawText
  *    `{% … %}`;
  *  - [SmartAppFormVariableReference] — ссылка с самой переменной `main_form`
  *    на определение целевой формы;
+ *  - [SmartAppUserFieldReference] и [SmartAppUserVariableReference] — семантика
+ *    модели пользователя: `<корень>.<имя>` и сама корневая переменная;
  *  - [SmartAppCustomKeywordReference] — ссылка со значения `type` на строку, где
  *    приложение зарегистрировало это ключевое слово в своём Python-коде.
  *
@@ -62,8 +65,12 @@ class SmartAppReferenceContributor : PsiReferenceContributor() {
                         return PsiReference.EMPTY_ARRAY
                     }
 
-                    // Иначе — семантические ссылки на поля формы внутри интерполяции.
-                    return fieldReferences(literal)
+                    // Иначе — семантические ссылки внутри выражений Jinja.
+                    // Два прохода, а не один: форменный требует известной
+                    // целевой формы и в `behaviors` вышел бы раньше нашего,
+                    // а модели пользователя форма не нужна вовсе (план, раздел 0).
+                    val refs = fieldReferences(literal) + userReferences(literal)
+                    return if (refs.isEmpty()) PsiReference.EMPTY_ARRAY else refs
                 }
             },
         )
@@ -92,6 +99,32 @@ class SmartAppReferenceContributor : PsiReferenceContributor() {
         for (candidate in SmartAppJinjaLexer.fieldCandidates(decoded.text)) {
             val rangeInElement = elementRange(decoded, candidate.fieldRange)
             refs.add(SmartAppFieldReference(literal, rangeInElement, FormFieldRef(form, candidate.field)))
+        }
+        return if (refs.isEmpty()) PsiReference.EMPTY_ARRAY else refs.toTypedArray()
+    }
+
+    /**
+     * Навешивает [SmartAppUserVariableReference] на каждое вхождение корневого
+     * имени и [SmartAppUserFieldReference] — на каждое `<корень>.<имя>`.
+     *
+     * Целевая форма здесь ни при чём: словарь параметров шаблона один и тот же
+     * на любой рендер, поэтому семантика работает в файле любого вида. Корней
+     * может быть несколько — все они псевдонимы одного объекта.
+     */
+    private fun userReferences(literal: JsonStringLiteral): Array<PsiReference> {
+        val file = literal.containingFile?.originalFile ?: return PsiReference.EMPTY_ARRAY
+        val roots = SmartAppUserRoot.of(file)?.names ?: return PsiReference.EMPTY_ARRAY
+        if (roots.isEmpty()) return PsiReference.EMPTY_ARRAY
+        val raw = rawText(literal) ?: return PsiReference.EMPTY_ARRAY
+        val decoded = JsonStringLiteralDecoder.decode(raw)
+
+        val refs = ArrayList<PsiReference>()
+        for (access in SmartAppJinjaLexer.rootAccesses(decoded.text)) {
+            if (access.root !in roots) continue
+            refs.add(SmartAppUserVariableReference(literal, elementRange(decoded, access.rootRange)))
+            val member = access.member ?: continue
+            val range = access.memberRange ?: continue
+            refs.add(SmartAppUserFieldReference(literal, elementRange(decoded, range), member))
         }
         return if (refs.isEmpty()) PsiReference.EMPTY_ARRAY else refs.toTypedArray()
     }

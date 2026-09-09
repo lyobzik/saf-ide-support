@@ -18,6 +18,7 @@ enum class SmartAppCompletionKind {
     FIELD,
     FILE,
     VARIABLE,
+    USER_FIELD,
     ;
 
     companion object {

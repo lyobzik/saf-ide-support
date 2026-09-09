@@ -21,8 +21,11 @@ import {
   customKeywords,
   hasExcludedDirBelow,
   hasExcludedSegment,
+  type AppFiles,
   type CustomKeyword,
 } from "./resourceKeywords";
+import { userModelOf, type UserModelInfo } from "./userModel";
+import { userRootOf, type UserRoot } from "./userRoot";
 import { resourceScan, typeContext } from "./contract";
 import { categoryFor } from "./typeContext";
 import { indexEligibility } from "./indexGate";
@@ -31,6 +34,13 @@ import { decode, rawText } from "./jsonDecode";
 import { fieldCandidates } from "./jinjaLexer";
 import { targetFormOf } from "./fieldRef";
 import { targetKinds } from "./refRules";
+
+/** Разобранный Python приложения: слова, модель пользователя и её корень. */
+interface AppPython {
+  readonly keywords: readonly CustomKeyword[];
+  readonly model: UserModelInfo | undefined;
+  readonly root: UserRoot;
+}
 
 /**
  * Воркспейс-индекс SmartApp DSL — замена четырёх `FileBasedIndex` плагина IDEA.
@@ -130,11 +140,16 @@ export class SmartAppIndex {
   private readonly pythonTexts = new Map<string, PythonFile>();
 
   /**
-   * Разобранный словарь по корням приложений. Сбрасывается целиком при любом
-   * изменении Python: правка базового класса меняет словарь производного, и
-   * обновить «только изменившийся файл» было бы неверно.
+   * Разобранный Python по корням приложений. Сбрасывается целиком при любом
+   * изменении Python: правка базового класса меняет и словарь производного, и
+   * его модель пользователя, — обновить «только изменившийся файл» было бы
+   * неверно.
+   *
+   * Три результата лежат в одной записи не для экономии: у них общий источник и
+   * общая инвалидация, а раздельные кэши пришлось бы сбрасывать в семи местах и
+   * рано или поздно разойтись.
    */
-  private readonly customCache = new Map<string, readonly CustomKeyword[]>();
+  private readonly appCache = new Map<string, AppPython>();
 
   /**
    * Снимок множества корней приложений. Появление нового корня (в том числе
@@ -172,14 +187,14 @@ export class SmartAppIndex {
 
   endPythonScan(): void {
     this.pythonScans = Math.max(0, this.pythonScans - 1);
-    this.customCache.clear();
+    this.appCache.clear();
   }
 
   clear(): void {
     this.files.clear();
     this.assets.clear();
     this.pythonTexts.clear();
-    this.customCache.clear();
+    this.appCache.clear();
     this.rootsSignature = undefined;
     this.pythonScans = 0;
     this.ready = false;
@@ -188,11 +203,11 @@ export class SmartAppIndex {
   /** Добавляет или заменяет текст Python-файла приложения. */
   upsertPython(uri: string, text: string): void {
     this.pythonTexts.set(pathKey(uri), { uri, text });
-    this.customCache.clear();
+    this.appCache.clear();
   }
 
   removePython(uri: string): void {
-    if (this.pythonTexts.delete(pathKey(uri))) this.customCache.clear();
+    if (this.pythonTexts.delete(pathKey(uri))) this.appCache.clear();
   }
 
   /** Файл относится к ресурсам приложения (не DSL, не шаблон)? */
@@ -210,7 +225,7 @@ export class SmartAppIndex {
     const signature = [...roots].sort().join("\n");
     if (signature !== this.rootsSignature) {
       this.rootsSignature = signature;
-      this.customCache.clear();
+      this.appCache.clear();
     }
     return roots;
   }
@@ -222,22 +237,60 @@ export class SmartAppIndex {
    * `subapp` — отдельное приложение, и его ресурсы в словарь внешнего не идут.
    */
   customKeywordsOf(scopeRoot: string | undefined): readonly CustomKeyword[] {
-    if (scopeRoot === undefined) return [];
-    // До готовности и во время сканирования словарь неполон: молчим, как и
+    return this.appPythonOf(scopeRoot)?.keywords ?? [];
+  }
+
+  /**
+   * Словарь модели пользователя приложения набора [scopeRoot].
+   * `undefined` — словаря нет либо индекс ещё не готов.
+   */
+  userModelOf(scopeRoot: string | undefined): UserModelInfo | undefined {
+    return this.appPythonOf(scopeRoot)?.model;
+  }
+
+  /**
+   * Корневое имя (имена) модели пользователя. `undefined` — индекс не готов;
+   * отсутствие доказательства отказом не является и живёт внутри [UserRoot].
+   */
+  userRootOf(scopeRoot: string | undefined): UserRoot | undefined {
+    return this.appPythonOf(scopeRoot)?.root;
+  }
+
+  /**
+   * Разобранный Python приложения набора [scopeRoot].
+   *
+   * Читаются только файлы, которыми владеет это же приложение: вложенный
+   * `subapp` — отдельное приложение, и его ресурсы в словарь внешнего не идут.
+   */
+  private appPythonOf(scopeRoot: string | undefined): AppPython | undefined {
+    if (scopeRoot === undefined) return undefined;
+    // До готовности и во время сканирования разбор неполон: молчим, как и
     // остальные запросы, зависящие от индекса.
-    if (!this.ready || this.pythonScans > 0) return [];
+    if (!this.ready || this.pythonScans > 0) return undefined;
     // Корни считаются первыми: их изменение сбрасывает кэш, и только после
     // этого можно смотреть в него.
     const roots = this.applicationRoots();
     const appRoot = applicationRootOf(scopeRoot);
-    const cached = this.customCache.get(appRoot);
+    const cached = this.appCache.get(appRoot);
     if (cached !== undefined) return cached;
 
+    const files = this.appFilesOf(appRoot, roots);
+    const resolved: AppPython = {
+      keywords: customKeywords(files),
+      model: userModelOf(files),
+      root: userRootOf(files),
+    };
+    this.appCache.set(appRoot, resolved);
+    return resolved;
+  }
+
+  /** Доступ к Python-файлам приложения [appRoot] — с правилом владения. */
+  private appFilesOf(appRoot: string, roots: Set<string>): AppFiles {
     const absolute = (relative: string): string =>
       appRoot.length === 0 ? relative : `${appRoot}/${relative}`;
     const owned = (path: string): boolean => ownerApplicationRoot(path, roots) === appRoot;
 
-    const resolved = customKeywords({
+    return {
       read: (relative) => {
         const path = absolute(relative);
         return owned(path) ? this.pythonTexts.get(path)?.text : undefined;
@@ -258,9 +311,7 @@ export class SmartAppIndex {
         }
         return false;
       },
-    });
-    this.customCache.set(appRoot, resolved);
-    return resolved;
+    };
   }
 
   /**
@@ -346,7 +397,7 @@ export class SmartAppIndex {
   }
 
   remove(uri: string): void {
-    if (this.files.delete(uri)) this.customCache.clear();
+    if (this.files.delete(uri)) this.appCache.clear();
     this.assets.delete(pathKey(uri));
     this.removePython(uri);
   }

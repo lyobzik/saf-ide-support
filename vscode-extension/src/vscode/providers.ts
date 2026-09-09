@@ -112,6 +112,10 @@ function completionKind(kind: CompletionKind): vscode.CompletionItemKind {
       return vscode.CompletionItemKind.File;
     case "variable":
       return vscode.CompletionItemKind.Variable;
+    case "user_field":
+      // Тот же вид, что у поля формы: для пользователя это такое же поле, и
+      // значок в списке обязан совпадать.
+      return vscode.CompletionItemKind.Field;
     default:
       return vscode.CompletionItemKind.Reference;
   }

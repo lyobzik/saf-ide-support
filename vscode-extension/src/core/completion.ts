@@ -3,6 +3,12 @@ import { propertyName, propertyValue, propertyOf, stringNodeAt, type Node } from
 import { isJinja } from "./jinja";
 import { isFileReference, isOfferablePath, searchDirs } from "./fileRefRules";
 import { decode, rawText } from "./jsonDecode";
+import {
+  IDENTIFIER_PART_CLASS,
+  IDENTIFIER_START_CLASS,
+  isAddressableName,
+  isIdentifierPart,
+} from "./identifiers";
 import { TokenType, tokenize } from "./jinjaLexer";
 import { targetFormOf } from "./fieldRef";
 import { targetKinds } from "./refRules";
@@ -19,7 +25,7 @@ import { isValueNode } from "./ast";
  * `CompletionItem` — дело адаптера.
  */
 
-export type CompletionKind = "keyword" | "name" | "field" | "file" | "variable";
+export type CompletionKind = "keyword" | "name" | "field" | "file" | "variable" | "user_field";
 
 export interface CompletionItem {
   readonly label: string;
@@ -38,6 +44,31 @@ export interface CompletionResult {
 const EMPTY: CompletionResult = { kind: "name", items: [], replaceStart: 0, replaceEnd: 0 };
 
 /**
+ * Левая граница обращения: начало выражения; символ, не входящий в
+ * идентификатор и не точка (`(`, `,`, `=`); пробел, перед которым нет точки.
+ * Исключение — `|`: после него Jinja ждёт имя фильтра, а не значение.
+ *
+ * Классы символов берутся из грамматики идентификатора, а не пишутся руками:
+ * иначе к двум определениям возвращаются через шаблон.
+ */
+const LEFT_BOUNDARY = `(?:^|[^${IDENTIFIER_PART_CLASS}.\\s|]|(?<![.\\s|])\\s)`;
+
+/** Начатый (возможно пустой) идентификатор. */
+const OPTIONAL_IDENTIFIER =
+  `(?:[${IDENTIFIER_START_CLASS}][${IDENTIFIER_PART_CLASS}]*)?`;
+
+/** Набранное начало идентификатора непосредственно перед кареткой. */
+const identifierTail = new RegExp(`[${IDENTIFIER_PART_CLASS}]*$`, "u");
+
+/** Хвост `<root>.<начатое имя>` в конце выражения. */
+function rootTailPattern(root: string): RegExp {
+  return new RegExp(
+    `${LEFT_BOUNDARY}\\s*${escapeRegExp(root)}\\s*\\.\\s*${OPTIONAL_IDENTIFIER}$`,
+    "u",
+  );
+}
+
+/**
  * Хвост выражения перед кареткой, открывающий completion имени поля: переменная
  * формы, точка и, возможно, начатый идентификатор — и конец. Проверяется именно
  * хвост: слева в выражении стоит ещё и `if `, `set x = `, `not ` и т.п.
@@ -52,10 +83,7 @@ const EMPTY: CompletionResult = { kind: "name", items: [], replaceStart: 0, repl
  * Цепочка (`main_form.x.`) и не-идентификатор (`main_form.2`) completion не
  * открывают — такие позиции всё равно не резолвятся.
  */
-const formContextPattern = new RegExp(
-  String.raw`(?:^|[^A-Za-z0-9_$À-￿.\s|]|(?<![.\s|])\s)\s*${escapeRegExp(jinja.formVariable)}\s*\.\s*` +
-    String.raw`(?:[A-Za-z_$À-￿][A-Za-z0-9_$À-￿]*)?$`,
-);
+const formContextPattern = rootTailPattern(jinja.formVariable);
 
 /**
  * Хвост выражения перед кареткой, открывающий completion самой переменной
@@ -66,9 +94,24 @@ const formContextPattern = new RegExp(
  * фильтра, значение там не подставляется.
  */
 const variableContextPattern = new RegExp(
-  String.raw`(?:^|[^A-Za-z0-9_$À-￿.\s|]|(?<![.\s|])\s)\s*` +
-    String.raw`(?:[A-Za-z_$À-￿][A-Za-z0-9_$À-￿]*)?$`,
+  `${LEFT_BOUNDARY}\\s*${OPTIONAL_IDENTIFIER}$`,
+  "u",
 );
+
+/**
+ * Хвост выражения `<root>.<начатое имя>` для произвольной корневой переменной.
+ * Корневых имён модели пользователя несколько и они зависят от приложения,
+ * поэтому шаблон строится по имени и запоминается.
+ */
+const rootPatterns = new Map<string, RegExp>();
+
+function rootContextPattern(root: string): RegExp {
+  const cached = rootPatterns.get(root);
+  if (cached !== undefined) return cached;
+  const pattern = rootTailPattern(root);
+  rootPatterns.set(root, pattern);
+  return pattern;
+}
 
 export function completionAt(
   index: SmartAppIndex,
@@ -212,36 +255,63 @@ function jinjaCompletion(
   if (exprOpenEnd === undefined) return EMPTY;
 
   const afterOpen = decoded.text.slice(exprOpenEnd, decodedCaret);
+  // Корневое имя предлагается только вместе со словарём: без модели за ним не
+  // стоит ничего, и вариант был бы пустым обещанием.
+  const model = index.userModelOf(context.scopeRoot);
+  const roots = model === undefined ? [] : (index.userRootOf(context.scopeRoot)?.names ?? []);
   const fields = formContextPattern.test(afterOpen);
-  if (!fields && !variableContextPattern.test(afterOpen)) return EMPTY;
+  // После `<корень>.` предлагаются атрибуты модели пользователя. Проверяется
+  // после формы: при совпадении имён (приложение связало `self._user` с
+  // `main_form`) корень из набора уже вычтен контрактом (план, раздел 0).
+  const userRoot = fields
+    ? undefined
+    : roots.find((root) => rootContextPattern(root).test(afterOpen));
+  const variable = !fields && userRoot === undefined && variableContextPattern.test(afterOpen);
+  if (!fields && userRoot === undefined && !variable) return EMPTY;
 
   const form = targetFormOf(node, context.kind);
-  if (form === undefined) return EMPTY;
+  // Полю формы известная форма нужна; модели пользователя — нет вовсе, её
+  // словарь один и тот же на любой рендер (план, раздел 0).
+  if (fields && form === undefined) return EMPTY;
 
   // Префикс поля — часть идентификатора после последней точки (пробел после
   // точки в идентификатор не входит); префикс переменной — сам начатый
   // идентификатор.
   const beforeCaret = decoded.text.slice(0, decodedCaret);
-  const prefix = fields
+  const afterDot = fields || userRoot !== undefined;
+  const prefix = afterDot
     ? beforeCaret.slice(beforeCaret.lastIndexOf(".") + 1).replace(/^\s+/, "")
-    : (/[A-Za-z0-9_$À-￿]*$/.exec(beforeCaret)?.[0] ?? "");
+    : (identifierTail.exec(beforeCaret)?.[0] ?? "");
 
   const items: CompletionItem[] = [];
-  if (fields) {
+  let kind: CompletionKind = "variable";
+  if (fields && form !== undefined) {
+    kind = "field";
     for (const field of index.fieldsOfForm(form, context.scopeRoot)) {
       // Поля с не-identifier именами лексер резолвить не способен — предлагать их
       // значит предлагать заведомо битые варианты (контракт v1).
-      if (!isLexerIdentifier(field)) continue;
+      if (!isAddressableName(field)) continue;
       items.push({ label: field, detail: "field" });
     }
+  } else if (userRoot !== undefined) {
+    kind = "user_field";
+    // Подпись — класс, чьи атрибуты предлагаются; у библиотечного активного
+    // класса его имени нет, и подписью служит сам корень.
+    const detail = model?.userClass?.name ?? userRoot;
+    for (const name of model?.attributes.keys() ?? []) items.push({ label: name, detail });
   } else {
     // Подпись — имя целевой формы: из текста её не видно, а именно она решает,
     // какие поля будут дальше.
-    items.push({ label: jinja.formVariable, detail: form });
+    if (form !== undefined) items.push({ label: jinja.formVariable, detail: form });
+    for (const root of roots) {
+      items.push({ label: root, detail: model?.userClass?.name ?? root });
+    }
+    // Ни формы, ни модели: предлагать имя без семантики незачем.
+    if (items.length === 0) return EMPTY;
   }
 
   return {
-    kind: fields ? "field" : "variable",
+    kind,
     items,
     replaceStart: offset - prefix.length,
     replaceEnd: identifierEnd(decoded, decodedCaret, node, offset),
@@ -260,7 +330,7 @@ function identifierEnd(
   offset: number,
 ): number {
   let end = decodedCaret;
-  while (end < decoded.text.length && /[A-Za-z0-9_$À-￿]/.test(decoded.text[end] as string)) end++;
+  while (end < decoded.text.length && isIdentifierPart(decoded.text[end] as string)) end++;
   const raw = decoded.decodedToRaw[end];
   // Открывающая кавычка литерала — +1 к смещению узла.
   return raw === undefined ? offset : node.offset + 1 + raw;
@@ -320,10 +390,6 @@ function exprContextAt(decodedText: string, decodedCaret: number): number | unde
 }
 
 /** Имя, которое лексер способен распознать как идентификатор поля. */
-function isLexerIdentifier(name: string): boolean {
-  return /^[A-Za-z_$À-￿][A-Za-z0-9_$À-￿]*$/.test(name);
-}
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

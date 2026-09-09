@@ -21,7 +21,7 @@ import { applicationRootOf, kindOf, referencesRoot } from "./files";
 import { isJinja } from "./jinja";
 import type { CustomKeyword } from "./resourceKeywords";
 import { decode, rawText } from "./jsonDecode";
-import { fieldCandidates, formVariableOccurrences } from "./jinjaLexer";
+import { fieldCandidates, formVariableOccurrences, rootAccesses } from "./jinjaLexer";
 import { targetFormOf } from "./fieldRef";
 import { targetKinds } from "./refRules";
 import { candidateUris, isFileReference } from "./fileRefRules";
@@ -60,6 +60,21 @@ export function documentContext(uri: string, text: string): DocumentContext {
   };
 }
 
+/**
+ * Обращение к модели пользователя, найденное в Jinja-значении.
+ *
+ * `member` пуст, когда каретка стоит на самой корневой переменной: у неё своя
+ * цель — класс пользователя, а не атрибут.
+ */
+export interface UserHit {
+  readonly root: string;
+  readonly rootStart: number;
+  readonly rootEnd: number;
+  readonly member: string | undefined;
+  readonly memberStart: number;
+  readonly memberEnd: number;
+}
+
 /** Обращение к полю формы, найденное в Jinja-значении. */
 export interface FieldHit {
   readonly form: string;
@@ -83,12 +98,26 @@ export interface RegistrationTarget extends Location {
   readonly name: string;
 }
 
+/**
+ * Объявление имени модели пользователя в Python-коде приложения.
+ *
+ * `kind` различает два вида цели: атрибут (`userField`) и сам класс
+ * пользователя (`userClass`). У класса — только переход: имени класса в тексте
+ * DSL нет, там стоит псевдоним из параметризатора, поэтому вхождений у него не
+ * бывает (план, раздел 9).
+ */
+export interface UserDeclarationTarget extends Location {
+  readonly target: "userDeclaration";
+  readonly kind: "userField" | "userClass";
+  readonly name: string;
+}
+
 /** Определения, на которые ведёт позиция offset. */
 export function definitionsAt(
   index: SmartAppIndex,
   context: DocumentContext,
   offset: number,
-): (Definition | FieldDefinition | FileTarget | RegistrationTarget)[] {
+): (Definition | FieldDefinition | FileTarget | RegistrationTarget | UserDeclarationTarget)[] {
   if (!index.isReady() || context.kind === undefined) return [];
 
   const node = stringNodeAt(context.parsed.root, offset);
@@ -99,6 +128,12 @@ export function definitionsAt(
     // Сама переменная `main_form` ведёт на определение целевой формы.
     const form = formVariableAt(node, context, offset);
     if (form !== undefined) return index.findDefinitions(form, [KIND.FORM], context.scopeRoot);
+
+    // Проход по модели пользователя — отдельный, а не ветка форменного: тот
+    // требует известной целевой формы, а у пользователя её нет вовсе, и в
+    // `behaviors` ранний выход случился бы до нашей ветки (план, раздел 0).
+    const user = userTargetsAt(index, context, node, offset);
+    if (user.length > 0) return user;
 
     const hit = fieldHitAt(node, context, offset);
     if (hit === undefined) return [];
@@ -206,6 +241,7 @@ export function diagnostics(index: SmartAppIndex, context: DocumentContext): Dia
           message: `Не удаётся разрешить поле '${hit.field}' формы '${hit.form}'`,
         });
       }
+      result.push(...userDiagnostics(index, context, node));
       return;
     }
 
@@ -340,6 +376,143 @@ export function fieldHits(node: Node, context: DocumentContext): FieldHit[] {
     });
   }
   return hits;
+}
+
+/**
+ * Обращения к модели пользователя в значении [node].
+ *
+ * Корневых имён может быть несколько — все они псевдонимы одного объекта.
+ * Целевой формы этот проход не требует: словарь параметров шаблона один и тот
+ * же на любой рендер, поэтому `user.<name>` значим в любом виде DSL-файла.
+ */
+export function userHits(
+  index: SmartAppIndex,
+  context: DocumentContext,
+  node: Node,
+): UserHit[] {
+  // Семантика — только у значений JSON: ключ `"{{ user.x }}"` ссылкой не
+  // является (тот же контракт, что у полей формы).
+  if (!isValueNode(node)) return [];
+  // Без словаря корневое имя ничего не значит: обращаться не к чему.
+  if (index.userModelOf(context.scopeRoot) === undefined) return [];
+  const roots = index.userRootOf(context.scopeRoot)?.names ?? [];
+  if (roots.length === 0) return [];
+  const raw = rawText(context.text.slice(node.offset, node.offset + node.length));
+  if (raw === undefined) return [];
+
+  const decoded = decode(raw);
+  const hits: UserHit[] = [];
+  for (const access of rootAccesses(decoded.text)) {
+    if (!roots.includes(access.root)) continue;
+    const rootStart = decoded.decodedToRaw[access.rootStart];
+    const rootEnd = decoded.decodedToRaw[access.rootEnd];
+    if (rootStart === undefined || rootEnd === undefined) continue;
+    const memberStart =
+      access.memberStart === undefined ? undefined : decoded.decodedToRaw[access.memberStart];
+    const memberEnd =
+      access.memberEnd === undefined ? undefined : decoded.decodedToRaw[access.memberEnd];
+    const hasMember = access.member !== undefined && memberStart !== undefined && memberEnd !== undefined;
+    hits.push({
+      root: access.root,
+      // +1 — открывающая кавычка литерала.
+      rootStart: node.offset + 1 + rootStart,
+      rootEnd: node.offset + 1 + rootEnd,
+      member: hasMember ? access.member : undefined,
+      memberStart: node.offset + 1 + (memberStart ?? 0),
+      memberEnd: node.offset + 1 + (memberEnd ?? 0),
+    });
+  }
+  return hits;
+}
+
+/**
+ * Цели перехода для позиции внутри обращения к модели пользователя.
+ *
+ * На имени атрибута — все его объявления в Python-коде приложения; на самой
+ * корневой переменной — класс пользователя. У имени из снимка фреймворка
+ * объявлений нет, и переходить некуда: это не отказ, а «в коде проекта такой
+ * строки не существует».
+ */
+function userTargetsAt(
+  index: SmartAppIndex,
+  context: DocumentContext,
+  node: Node,
+  offset: number,
+): UserDeclarationTarget[] {
+  const model = index.userModelOf(context.scopeRoot);
+  if (model === undefined || context.scopeRoot === undefined) return [];
+  const appRoot = applicationRootOf(context.scopeRoot);
+
+  for (const hit of userHits(index, context, node)) {
+    if (hit.member !== undefined && containsCaret(hit.memberStart, hit.memberEnd, offset)) {
+      const attribute = model.attributes.get(hit.member);
+      if (attribute === undefined) return [];
+      return attribute.declarations.flatMap((site) => {
+        const uri = index.registrationUri(appRoot, site.file);
+        return uri === undefined
+          ? []
+          : [
+              {
+                target: "userDeclaration" as const,
+                kind: "userField" as const,
+                uri,
+                start: site.nameStart,
+                end: site.nameEnd,
+                name: hit.member as string,
+              },
+            ];
+      });
+    }
+    if (containsCaret(hit.rootStart, hit.rootEnd, offset)) {
+      const cls = model.userClass;
+      if (cls === undefined) return [];
+      const uri = index.registrationUri(appRoot, cls.file);
+      return uri === undefined
+        ? []
+        : [
+            {
+              target: "userDeclaration",
+              kind: "userClass",
+              uri,
+              start: cls.nameStart,
+              end: cls.nameEnd,
+              name: cls.name,
+            },
+          ];
+    }
+  }
+  return [];
+}
+
+/**
+ * WARNING на имени, которого нет в словаре модели пользователя.
+ *
+ * Утверждать можно только при двух условиях сразу: словарь полон
+ * (`diagnosticsSafe`, раздел 5) и корневое имя доказано разбором
+ * параметризатора (раздел 3). Без второго под именем `user` может лежать что
+ * угодно, и подчёркивать по нему — выдумывать ошибку.
+ */
+function userDiagnostics(
+  index: SmartAppIndex,
+  context: DocumentContext,
+  node: Node,
+): Diagnostic[] {
+  const model = index.userModelOf(context.scopeRoot);
+  const root = index.userRootOf(context.scopeRoot);
+  if (model === undefined || root === undefined) return [];
+  if (!model.diagnosticsSafe || root.state !== "proven") return [];
+
+  const result: Diagnostic[] = [];
+  for (const hit of userHits(index, context, node)) {
+    if (hit.member === undefined) continue;
+    if (model.attributes.has(hit.member)) continue;
+    result.push({
+      start: hit.memberStart,
+      end: hit.memberEnd,
+      message: `Не удаётся разрешить поле '${hit.member}' модели пользователя`,
+    });
+  }
+  return result;
 }
 
 /**

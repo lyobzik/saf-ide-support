@@ -29,6 +29,17 @@ object SmartAppIdentifiers {
         CharCategory.OTHER_LETTER,
     )
 
+    /**
+     * Та же грамматика в виде **классов символов** для регулярных выражений: их
+     * зовёт completion, где контекст каретки разбирается шаблоном, а не
+     * посимвольно. Шаблон обязан собираться отсюда, иначе к двум определениям
+     * грамматики вернулись бы через чёрный ход — ровно так и было:
+     * `isJavaIdentifier*` принимает `$` и знаки валют, а `ª` и `µ` в
+     * приближении расширения терялись.
+     */
+    const val IDENTIFIER_START_CLASS: String = "\\p{L}_"
+    const val IDENTIFIER_PART_CLASS: String = "\\p{L}\\p{Nd}_"
+
     /** Начало идентификатора: `_` или буква (категория `L*`). */
     fun isIdentifierStart(c: Char): Boolean = c == '_' || c.category in LETTERS
 

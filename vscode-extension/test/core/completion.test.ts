@@ -62,6 +62,34 @@ describe("поля формы внутри Jinja", () => {
     expect(result.items.map((i) => i.label)).toEqual(["name", "age"]);
   });
 
+  it("грамматика имени — общая с лексером, а не приближение", () => {
+    // `µ` (U+00B5) — буква и валидное имя по контракту, но в старом
+    // приближении `[A-Za-z_$À-￿]` оно начиналось только с U+00C0 и терялось.
+    // `×` (U+00D7) наоборот буквой не является, хотя в диапазон попадал.
+    const withUnicode =
+      '{ "hello_form": { "type": "form", "fields": { "µ": {}, "a×b": {} } } }';
+    const result = at(scenarioUri, scenario("{{ main_form.|"), { [formsUri]: withUnicode });
+    expect(result.items.map((i) => i.label)).toEqual(["µ"]);
+  });
+
+  it("контекст открывается и на не-ASCII префиксе", () => {
+    const withUnicode = '{ "hello_form": { "type": "form", "fields": { "µs": {} } } }';
+    const result = at(scenarioUri, scenario("{{ main_form.µ|"), { [formsUri]: withUnicode });
+    expect(result.kind).toBe("field");
+    expect(result.items.map((i) => i.label)).toEqual(["µs"]);
+  });
+
+  it("после не-идентификаторного символа контекст не открывается", () => {
+    // `$` идентификатором по контракту не является, и `main_form.name$` —
+    // не обращение к полю: лексер видит там имя и текст. Обе прежние
+    // грамматики (`[A-Za-z_$À-￿]` и `isJavaIdentifier*`) принимали `$`.
+    const result = at(scenarioUri, scenario("{{ main_form.name$|"), { [formsUri]: forms });
+    // Предлагается сама переменная (каретка на пустом идентификаторе после
+    // `$`), но не поля: обращения к полю здесь нет.
+    expect(result.kind).toBe("variable");
+    expect(result.items.map((i) => i.label)).not.toContain("name");
+  });
+
   it("сужает диапазон замены до набранного префикса", () => {
     const source = scenario("{{ main_form.na|");
     const offset = source.indexOf("|");

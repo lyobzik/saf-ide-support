@@ -314,6 +314,55 @@ describe("CompletionItemProvider для переменной формы", () => 
   });
 });
 
+describe("CompletionItemProvider для модели пользователя", () => {
+  const appRoot = "file:///u";
+  const userWorkspace = (() => {
+    const index = new SmartAppIndex();
+    const texts = new Map<string, string>([
+      [
+        `${appRoot}/app_config.py`,
+        "from app.user import CustomUser\n\nUSER = CustomUser\n",
+      ],
+      [
+        `${appRoot}/app/user.py`,
+        "from scenarios.user.user_model import User\n\n\nclass CustomUser(User):\n" +
+          "    @property\n    def fields(self):\n" +
+          '        return super().fields + [Field("smart_geo", Geo)]\n',
+      ],
+    ]);
+    for (const [uri, text] of texts) index.upsert(uri, text);
+    index.markReady();
+    return { index, textOf: (uri: string) => texts.get(uri) } as never;
+  })();
+
+  it("вид варианта — поле, а не ссылка", async () => {
+    // Новый вид completion обязан доехать до адаптера: иначе он показывается
+    // как Reference, и значок в списке отличается от поля формы.
+    const text = [
+      "{",
+      '  "b": {',
+      '    "text": "{{ user.smart_ }}"',
+      "  }",
+      "}",
+    ].join("\n");
+    const uri = `${appRoot}/static/references/behaviors/b.json`;
+    (userWorkspace as unknown as { index: SmartAppIndex }).index.upsert(uri, text);
+    const provider = createCompletionProvider(userWorkspace);
+    const items = (await provider.provideCompletionItems(
+      doc(uri, text),
+      positionOf(text, "user.smart_", 11),
+      undefined as never,
+      undefined as never,
+    )) as unknown as vscodeMock.CompletionItem[];
+
+    // Отбор по префиксу делает редактор; ядро отдаёт весь словарь.
+    expect(items.map((i) => i.label)).toContain("smart_geo");
+    expect(new Set(items.map((i) => i.kind))).toEqual(
+      new Set([vscodeMock.CompletionItemKind.Field]),
+    );
+  });
+});
+
 describe("CompletionItemProvider для файлов шаблонов", () => {
   const formsWithFile = [
     "{",

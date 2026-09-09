@@ -12,6 +12,9 @@ import com.intellij.psi.PsiElement
 import ru.sber.smartapp.dsl.SmartAppFiles
 import ru.sber.smartapp.dsl.SmartAppKeywords
 import ru.sber.smartapp.dsl.resources.SmartAppCustomKeywords
+import ru.sber.smartapp.dsl.resources.SmartAppUserModel
+import ru.sber.smartapp.dsl.resources.SmartAppUserRoot
+import ru.sber.smartapp.dsl.resources.SmartAppUserRootResolver
 import ru.sber.smartapp.dsl.SmartAppRefKind
 import ru.sber.smartapp.dsl.SmartAppScopes
 import ru.sber.smartapp.dsl.SmartAppTypeContext
@@ -149,6 +152,45 @@ class SmartAppAnnotator : Annotator, DumbAware {
                 .create()
         }
         annotateUnresolvedJinjaField(literal, decoded, holder)
+        annotateUnresolvedUserField(literal, decoded, holder)
+    }
+
+    /**
+     * WARNING «Не удаётся разрешить поле … модели пользователя» для
+     * `<корень>.<имя>` в любом выражении Jinja.
+     *
+     * Утверждать можно только при двух условиях сразу: словарь полон
+     * (`diagnosticsSafe`, план раздел 5) и корневое имя **доказано** разбором
+     * параметризатора (раздел 3). Без второго под именем `user` может лежать
+     * что угодно, и подчёркивать по нему — выдумывать ошибку. Гейта целевой
+     * формы здесь нет вовсе: словарь параметров один и тот же на любой рендер.
+     *
+     * Индекс не читается: словарь собирается по VFS, поэтому dumb-guard не нужен.
+     */
+    private fun annotateUnresolvedUserField(
+        literal: JsonStringLiteral,
+        decoded: JsonStringLiteralDecoder.Decoded,
+        holder: AnnotationHolder,
+    ) {
+        val file = literal.containingFile?.originalFile ?: return
+        val model = SmartAppUserModel.of(file) ?: return
+        val root = SmartAppUserRoot.of(file) ?: return
+        if (!model.diagnosticsSafe) return
+        if (root.state != SmartAppUserRootResolver.RootState.PROVEN) return
+        val baseOffset = literal.textOffset + 1
+
+        for (access in SmartAppJinjaLexer.rootAccesses(decoded.text)) {
+            if (access.root !in root.names) continue
+            val member = access.member ?: continue
+            val range = access.memberRange ?: continue
+            if (member in model.attributes) continue
+            val rawStart = decoded.decodedToRaw[range.startOffset]
+            val rawEnd = decoded.decodedToRaw[range.endOffset]
+            holder.newAnnotation(
+                HighlightSeverity.WARNING,
+                "Не удаётся разрешить поле '$member' модели пользователя",
+            ).range(TextRange(baseOffset + rawStart, baseOffset + rawEnd)).create()
+        }
     }
 
     /**

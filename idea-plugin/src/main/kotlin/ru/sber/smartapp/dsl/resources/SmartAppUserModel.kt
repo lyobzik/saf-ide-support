@@ -44,6 +44,39 @@ object SmartAppUserModel {
             .info
     }
 
+    /**
+     * Объявления атрибута [name] в Python-коде приложения, которому принадлежит
+     * [dslFile]. Пустой список — имя пришло из снимка фреймворка либо словаря
+     * нет вовсе: идти в коде проекта некуда.
+     */
+    fun declarations(dslFile: PsiFile, name: String): List<SmartAppUserFieldElement> {
+        val virtualFile = dslFile.virtualFile ?: return emptyList()
+        val appRoot = SmartAppCustomKeywords.applicationRoot(virtualFile) ?: return emptyList()
+        val attribute = ofRoot(dslFile.project, appRoot)?.attributes?.get(name) ?: return emptyList()
+
+        val manager = PsiManager.getInstance(dslFile.project)
+        val files = HashMap<String, PsiFile?>()
+        return attribute.declarations.mapNotNull { site ->
+            val file = files.getOrPut(site.file) {
+                appRoot.findFileByRelativePath(site.file)?.let { manager.findFile(it) }
+            } ?: return@mapNotNull null
+            SmartAppUserFieldElement(file, name, site)
+        }
+    }
+
+    /**
+     * Класс приложения, назначенный `USER`, как цель перехода с корневой
+     * переменной. `null` — активный класс библиотечный: переходить некуда.
+     */
+    fun userClass(dslFile: PsiFile): SmartAppUserClassElement? {
+        val virtualFile = dslFile.virtualFile ?: return null
+        val appRoot = SmartAppCustomKeywords.applicationRoot(virtualFile) ?: return null
+        val site = ofRoot(dslFile.project, appRoot)?.userClass ?: return null
+        val file = appRoot.findFileByRelativePath(site.file)
+            ?.let { PsiManager.getInstance(dslFile.project).findFile(it) } ?: return null
+        return SmartAppUserClassElement(file, site)
+    }
+
     private class Provider(
         private val project: Project,
         private val appRoot: VirtualFile,

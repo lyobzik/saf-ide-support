@@ -33,7 +33,10 @@ import ru.sber.smartapp.dsl.reference.SmartAppJinjaLexer
 import ru.sber.smartapp.dsl.reference.SmartAppJinjaTokenType
 import ru.sber.smartapp.dsl.reference.SmartAppRefRules
 import ru.sber.smartapp.dsl.reference.SmartAppTemplateFiles
+import ru.sber.smartapp.dsl.reference.SmartAppIdentifiers
 import ru.sber.smartapp.dsl.reference.SmartAppReferenceContributor
+import ru.sber.smartapp.dsl.resources.SmartAppUserModel
+import ru.sber.smartapp.dsl.resources.SmartAppUserRoot
 
 /**
  * Дополняет строковые значения SmartApp DSL:
@@ -162,7 +165,9 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         result: CompletionResultSet,
     ) {
         val project = literal.project
-        if (DumbService.isDumb(project)) return
+        // Guard'а на dumb mode здесь нет: словарь модели пользователя читается
+        // по VFS и доступен во время индексации. Он стоит ниже — ровно вокруг
+        // ветки полей формы, единственной, что читает индекс.
 
         // Позиция каретки в raw-координатах литерала (без кавычек).
         val rawCaret = parameters.offset - literal.textOffset - 1
@@ -190,27 +195,76 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         // стоит ещё и `set x = `.
         val afterOpen = decoded.text.substring(exprOpenEnd, decodedCaret)
         val fields = MAIN_FORM_TAIL.containsMatchIn(afterOpen)
-        if (!fields && !VARIABLE_TAIL.containsMatchIn(afterOpen)) return
+        // Корневое имя предлагается только вместе со словарём: без модели за ним
+        // не стоит ничего, и вариант был бы пустым обещанием.
+        val model = SmartAppUserModel.of(originalFile)
+        val roots = if (model == null) emptyList() else SmartAppUserRoot.of(originalFile)?.names.orEmpty()
+        val userRoot = if (fields) null else roots.firstOrNull { userTail(it).containsMatchIn(afterOpen) }
+        val variable = !fields && userRoot == null && VARIABLE_TAIL.containsMatchIn(afterOpen)
+        if (!fields && userRoot == null && !variable) return
 
-        val form = SmartAppFieldRef.targetFormOf(literal, fileKind) ?: return
-        val scope = SmartAppScopes.forPsiFile(originalFile)
+        val form = SmartAppFieldRef.targetFormOf(literal, fileKind)
+        // Полю формы известная форма нужна; модели пользователя — нет вовсе, её
+        // словарь один и тот же на любой рендер (план, раздел 0).
+        if (fields && form == null) return
 
-        if (!fields) {
-            // Каретка стоит на самом идентификаторе: предлагаем переменную формы.
-            // Подпись — имя целевой формы: из текста её не видно, а именно она
-            // решает, какие поля будут дальше.
-            val prefix = IDENTIFIER_TAIL.find(decoded.text.substring(0, decodedCaret))?.value ?: ""
-            result.withPrefixMatcher(prefix).addElement(
-                marked(
-                    LookupElementBuilder.create(JinjaSpec.formVariable)
-                        .withTypeText(form)
-                        .withInsertHandler(REPLACE_IDENTIFIER_TAIL),
-                    SmartAppCompletionKind.VARIABLE,
-                    FIELD_PRIORITY,
-                ),
-            )
+        if (userRoot != null) {
+            // Каретка после `<корень>.`: предлагаем атрибуты модели.
+            val prefix = decoded.text.substring(0, decodedCaret).substringAfterLast('.')
+                .dropWhile { it.isWhitespace() }
+            // Подпись — класс, чьи атрибуты предлагаются; у библиотечного
+            // активного класса имени нет, и подписью служит сам корень.
+            val typeText = model?.userClass?.name ?: userRoot
+            val userResult = result.withPrefixMatcher(prefix)
+            for (name in model?.attributes?.keys.orEmpty()) {
+                userResult.addElement(
+                    marked(
+                        LookupElementBuilder.create(name)
+                            .withTypeText(typeText)
+                            .withInsertHandler(REPLACE_IDENTIFIER_TAIL),
+                        SmartAppCompletionKind.USER_FIELD,
+                        FIELD_PRIORITY,
+                    ),
+                )
+            }
             return
         }
+
+        if (!fields) {
+            // Каретка стоит на самом идентификаторе: предлагаем переменную формы
+            // и корневые имена модели. Подпись переменной формы — имя целевой
+            // формы: из текста её не видно, а именно она решает, какие поля
+            // будут дальше.
+            val prefix = IDENTIFIER_TAIL.find(decoded.text.substring(0, decodedCaret))?.value ?: ""
+            val variableResult = result.withPrefixMatcher(prefix)
+            if (form != null) {
+                variableResult.addElement(
+                    marked(
+                        LookupElementBuilder.create(JinjaSpec.formVariable)
+                            .withTypeText(form)
+                            .withInsertHandler(REPLACE_IDENTIFIER_TAIL),
+                        SmartAppCompletionKind.VARIABLE,
+                        FIELD_PRIORITY,
+                    ),
+                )
+            }
+            for (root in roots) {
+                variableResult.addElement(
+                    marked(
+                        LookupElementBuilder.create(root)
+                            .withTypeText(model?.userClass?.name ?: root)
+                            .withInsertHandler(REPLACE_IDENTIFIER_TAIL),
+                        SmartAppCompletionKind.VARIABLE,
+                        FIELD_PRIORITY,
+                    ),
+                )
+            }
+            return
+        }
+        checkNotNull(form)
+        // Дальше — единственная индекс-зависимая ветка: имена полей формы.
+        if (DumbService.isDumb(project)) return
+        val scope = SmartAppScopes.forPsiFile(originalFile)
         // Prefix перед кареткой — содержимое после последней точки в `main_form.`,
         // иначе платформа отфильтрует варианты по всему `main_form.` и они не
         // совпадут с именами полей. Пробел после точки в идентификатор не входит.
@@ -221,7 +275,7 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
             // Поля с не-identifier именами (точки, двоеточия, дефисы) лексер
             // резолвить не способен — в completion не предлагаем (контракт v1;
             // синтаксис доступа к таким полям — отдельное проектирование).
-            if (!isLexerIdentifier(field)) continue
+            if (!SmartAppIdentifiers.isAddressableName(field)) continue
             fieldResult.addElement(
                 marked(
                     LookupElementBuilder.create(field)
@@ -288,10 +342,6 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
      * (`isJavaIdentifierStart`/`isJavaIdentifierPart`): только такие имена полей
      * резолвятся из `{{ main_form.<field> }}`.
      */
-    private fun isLexerIdentifier(name: String): Boolean =
-        name.isNotEmpty() && name.first().isJavaIdentifierStart() &&
-            name.asSequence().drop(1).all { it.isJavaIdentifierPart() }
-
     /**
      * Позиция каретки в decoded-координатах: число decoded-символов, чей
      * raw-старт строго левее raw-позиции каретки. Без escape совпадает с
@@ -381,6 +431,21 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         const val FIELD_PRIORITY = 30.0
         const val FILE_PRIORITY = 40.0
 
+        /**
+         * Левая граница обращения: начало выражения; символ, не входящий в
+         * идентификатор и не точка (`(`, `,`, `=`); пробел, перед которым нет
+         * точки. Исключение — `|`: после него Jinja ждёт имя фильтра.
+         *
+         * Классы символов берутся из грамматики идентификатора, а не пишутся
+         * руками: иначе к двум определениям возвращаются через шаблон.
+         */
+        const val LEFT_BOUNDARY: String =
+            "(?:^|[^${SmartAppIdentifiers.IDENTIFIER_PART_CLASS}.\\s|]|(?<![.\\s|])\\s)"
+
+        /** Начатый (возможно пустой) идентификатор. */
+        const val OPTIONAL_IDENTIFIER: String =
+            "(?:[${SmartAppIdentifiers.IDENTIFIER_START_CLASS}][${SmartAppIdentifiers.IDENTIFIER_PART_CLASS}]*)?"
+
         // Хвост выражения перед кареткой, открывающий completion имени поля:
         // переменная формы, опциональные пробелы, точка, опциональный частичный
         // идентификатор (первый символ — identifierStart, как у VAR лексера) и
@@ -396,23 +461,29 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
         // — обычнейшая позиция в бою, и именно она не работала.
         //
         // Хвост `x.` (цепочка) и `2` (не-идентификатор) completion не открывают.
-        val MAIN_FORM_TAIL: Regex = Regex(
-            """(?:^|[^\p{javaJavaIdentifierPart}.\s|]|(?<![.\s|])\s)\s*""" +
-                Regex.escape(JinjaSpec.formVariable) +
-                """\s*\.\s*(?:\p{javaJavaIdentifierStart}\p{javaJavaIdentifierPart}*)?$""",
-        )
+        val MAIN_FORM_TAIL: Regex = rootTail(JinjaSpec.formVariable)
 
         // Хвост, открывающий completion самой переменной формы: начатый (возможно
         // пустой) идентификатор, перед которым нет точки. Левая граница — та же,
         // что у поля: `variables.mai` и `variables. mai` — чужой объект, а
         // `x | mai` — позиция имени фильтра.
-        val VARIABLE_TAIL: Regex = Regex(
-            """(?:^|[^\p{javaJavaIdentifierPart}.\s|]|(?<![.\s|])\s)\s*""" +
-                """(?:\p{javaJavaIdentifierStart}\p{javaJavaIdentifierPart}*)?$""",
+        val VARIABLE_TAIL: Regex = Regex("$LEFT_BOUNDARY\\s*$OPTIONAL_IDENTIFIER$")
+
+        /**
+         * Хвост `<root>.<начатое имя>` для произвольной корневой переменной.
+         * Корневых имён модели пользователя несколько и они зависят от
+         * приложения, поэтому шаблон строится по имени и запоминается.
+         */
+        private val userTails = HashMap<String, Regex>()
+
+        fun userTail(root: String): Regex = userTails.getOrPut(root) { rootTail(root) }
+
+        private fun rootTail(root: String): Regex = Regex(
+            "$LEFT_BOUNDARY\\s*" + Regex.escape(root) + "\\s*\\.\\s*$OPTIONAL_IDENTIFIER$",
         )
 
         /** Набранное начало идентификатора непосредственно перед кареткой. */
-        val IDENTIFIER_TAIL: Regex = Regex("""\p{javaJavaIdentifierPart}*$""")
+        val IDENTIFIER_TAIL: Regex = Regex("[${SmartAppIdentifiers.IDENTIFIER_PART_CLASS}]*$")
 
         /**
          * Вставка заменяет слово целиком: хвост идентификатора справа от каретки
@@ -424,7 +495,7 @@ class SmartAppCompletionContributor : CompletionContributor(), DumbAware {
             val document = context.document
             val text = document.charsSequence
             var end = context.tailOffset
-            while (end < document.textLength && text[end].isJavaIdentifierPart()) end++
+            while (end < document.textLength && SmartAppIdentifiers.isIdentifierPart(text[end])) end++
             if (end > context.tailOffset) document.deleteString(context.tailOffset, end)
         }
     }
