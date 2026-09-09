@@ -116,7 +116,7 @@ export function userModelOf(files: AppFiles): UserModelInfo | undefined {
     attributes: new Map(
       [...attributes.entries()]
         .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-        .map(([name, declarations]) => [name, { name, declarations }]),
+        .map(([name, declarations]) => [name, { name, declarations: ordered(declarations) }]),
     ),
     diagnosticsSafe:
       floor?.diagnosticsSafe === true &&
@@ -131,6 +131,32 @@ export function userModelOf(files: AppFiles): UserModelInfo | undefined {
             nameEnd: derived.cls.nameEnd,
           },
   };
+}
+
+/**
+ * Объявления имени в порядке «файл, затем смещение», без повторов той же пары.
+ *
+ * Порядок — часть контракта: цели перехода видит пользователь, а корпус
+ * сравнивает их списком, и порядок сборки (сначала прямые объявления, потом
+ * свёрнутые поля) двум реализациям обещать нечего. Дедупликация по той же паре:
+ * одна строка не должна попадать в список дважды, как бы её ни нашли.
+ */
+function ordered(declarations: readonly UserDeclarationSite[]): UserDeclarationSite[] {
+  const seen = new Set<string>();
+  const result: UserDeclarationSite[] = [];
+  for (const site of declarations) {
+    const key = `${site.file} ${site.nameStart}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(site);
+  }
+  return result.sort((left, right) =>
+    left.file === right.file
+      ? left.nameStart - right.nameStart
+      : left.file < right.file
+        ? -1
+        : 1,
+  );
 }
 
 /** Годится ли имя как атрибут модели: адресуемо и без ведущего `_`. */

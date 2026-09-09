@@ -111,7 +111,7 @@ object SmartAppUserModelResolver {
         val derived = chain.classes.lastOrNull()
         return Info(
             attributes = attributes.toSortedMap().mapValues { (name, sites) ->
-                Attribute(name, sites.toList())
+                Attribute(name, ordered(sites))
             },
             diagnosticsSafe = floor?.diagnosticsSafe == true &&
                 chain.classes.all { it.cls.blockers.isEmpty() },
@@ -120,6 +120,19 @@ object SmartAppUserModelResolver {
             },
         )
     }
+
+    /**
+     * Объявления имени в порядке «файл, затем смещение», без повторов той же
+     * пары.
+     *
+     * Порядок — часть контракта: цели перехода видит пользователь, а корпус
+     * сравнивает их списком, и порядок сборки (сначала прямые объявления, потом
+     * свёрнутые поля) двум реализациям обещать нечего. Дедупликация по той же
+     * паре: одна строка не должна попадать в список дважды, как бы её ни нашли.
+     */
+    private fun ordered(sites: List<DeclarationSite>): List<DeclarationSite> =
+        sites.distinctBy { it.file to it.nameStart }
+            .sortedWith(compareBy({ it.file }, { it.nameStart }))
 
     /** Годится ли имя как атрибут модели: адресуемо и без ведущего `_`. */
     private fun isOfferable(name: String): Boolean =
