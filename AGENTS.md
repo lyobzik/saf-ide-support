@@ -31,7 +31,11 @@ JSON-парсера редактора**. Возможности (одинако
   автодополнение, переход к строке регистрации в `.py` и поиск использований;
 - переход к файлу шаблона: `"file"` при `"type": "unified_template"` ведёт в
   `static/references/templates/<значение>`; в той же позиции автодополняются
-  имена файлов каталога шаблонов (вложенные пути — целиком).
+  имена файлов каталога шаблонов (вложенные пути — целиком);
+- поля модели пользователя в Jinja (`{{ user.<field> }}`): автодополнение,
+  переход к строке объявления в Python-коде приложения, поиск использований и
+  WARNING на несуществующем имени — во **всех шести** видах DSL-файлов, потому
+  что словарь параметров шаблона один и тот же на любой рендер.
 
 ## Монорепозиторий и два контракта
 
@@ -52,7 +56,7 @@ Gate'ов тоже два — GitLab и GitHub, — но проверки у н�
 
 | Контракт | Артефакт | Проверка |
 |---|---|---|
-| Данные: виды, каталоги, сегменты пути, ссылочные правила (включая файловые), ключи контекста `type`, структурные ключи, `form`/`fields`, `main_form`, реестры фреймворка (`keywordRegistries`), правила сканирования ресурсов (`resourceScan`), словарь | `shared/rules/rules.json`, `shared/keywords/keywords.json` (+ схемы) | `:idea-plugin:exportRules --check`, `generate_keywords.py --check`, `npm run verify:contract` |
+| Данные: виды, каталоги, сегменты пути, ссылочные правила (включая файловые), ключи контекста `type`, структурные ключи, `form`/`fields`, `main_form`, реестры фреймворка (`keywordRegistries`), правила сканирования ресурсов (`resourceScan`), модель пользователя (`userModel`), словари | `shared/rules/rules.json`, `shared/keywords/keywords.json`, `shared/keywords/user_fields.json` (+ схемы) | `:idea-plugin:exportRules --check`, `generate_keywords.py --check`, `generate_user_fields.py --check`, `npm run verify:contract` |
 | Поведение: резолв, диагностика, completion, Jinja, изоляция наборов, строгость индексации | `shared/fixtures/**` | `SmartAppConformanceTest` (Kotlin) и `test/conformance` (TS) на одном корпусе |
 
 Правила работы с контрактом:
@@ -124,6 +128,13 @@ Gate'ов тоже два — GitLab и GitHub, — но проверки у н�
 | `rename/SmartAppRenameProcessor` | Ограничивает rename ссылками плагина в своём наборе `references`: иначе платформа переписывает одноимённые ключи чужих наборов |
 | `contract/SmartAppContract` + `SmartAppSpecs` | Таблицы данных DSL (виды, ссылочные правила, ключи контекста, структурные ключи, пути, `main_form`, реестры фреймворка и правила сканирования ресурсов) — их использует рантайм и сериализует экспортёр |
 | `contract/ExportRules` | Сериализация тех же таблиц в `shared/rules/rules.json`; режим `--check` для CI |
+| `resources/SmartAppUserFields` | Загрузка снимка полей фреймворка из classpath, fail-closed |
+| `resources/SmartAppUserModelResolver` | Словарь модели пользователя: цепочка от `USER`, пол по `libraryBase`, свёртка `fields`, гасители (порт `core/userModel.ts`) |
+| `resources/SmartAppUserRootResolver` | Корневое имя по `PARAMETRIZER`: правило `<d>` в `_get_user_data`, три исхода — доказано / нет доказательства / доказательство обратного (порт `core/userRoot.ts`) |
+| `resources/SmartAppUserModel`, `resources/SmartAppUserRoot` | Кэш `CachedValuesManager` по каталогу приложения; без `FileBasedIndex`, поэтому работают в dumb mode |
+| `resources/SmartAppUserFieldElement`, `…UserClassElement` | `FakePsiElement` строки объявления и строки `class <Name>`; оба отказывают в `setName` |
+| `reference/SmartAppUserFieldReference`, `…UserVariableReference` | Мягкие поли-вариантные ссылки `<корень>.<имя>` и самой корневой переменной |
+| `findusages/SmartAppUserFieldUsages` | Цель поиска и обход JSON-файлов приложения; для класса пользователя поиск не заводится |
 
 Исходники расширения: `vscode-extension/src/`
 
@@ -136,6 +147,7 @@ Gate'ов тоже два — GitLab и GitHub, — но проверки у н�
 | `core/refRules.ts`, `core/fileRefRules.ts`, `core/typeContext.ts`, `core/fieldRef.ts` | Порты одноимённых Kotlin-объектов |
 | `core/indexGate.ts` | Строгость индексации — эквивалент `JsonPsi.hasError` |
 | `core/pythonScan.ts`, `core/resourceKeywords.ts` | Порты сканера Python и резолвера ресурсов приложения (1:1 с `resources/**` плагина) |
+| `core/userModel.ts`, `core/userRoot.ts` | Порты словаря модели пользователя и разбора корневого имени по параметризатору |
 | `core/index.ts` | Воркспейс-индекс вместо четырёх `FileBasedIndex`, обратный индекс использований и реестр не-DSL файлов набора (для файловых ссылок) |
 | `core/semantics.ts`, `core/completion.ts`, `core/semanticTokens.ts`, `core/rename.ts` | Резолв, диагностика, автодополнение, подсветка, переименование — всё в смещениях |
 | `vscode/workspace.ts` | `findFiles`, watcher (JSON и `**/*.py`), дебаунс, хранилище текстов; кормит ядро через `upsert`/`remove`, сканирования Python выполняются строго по одному |
@@ -143,6 +155,9 @@ Gate'ов тоже два — GitLab и GitHub, — но проверки у н�
 
 Ресурсы: `src/main/resources/META-INF/plugin.xml`,
 `src/main/resources/keywords/keywords.json` (генерируется).
+
+Генератор снимка полей модели пользователя: `tools/generate_user_fields.py`
+(AST-разбор вендоренных `core/model/*.py` и `scenarios/user/user_model.py`).
 
 Генератор словаря: `tools/generate_keywords.py` (AST-парсинг
 `smart_kit/resources/__init__.py`; vendored-копия в `tools/vendor/`).
@@ -179,6 +194,7 @@ Gate'ов тоже два — GitLab и GitHub, — но проверки у н�
 | Экспорт контракта данных | `./gradlew :idea-plugin:exportRules` (проверка: `--check`) |
 | Сборка против maven-платформы | `./gradlew :idea-plugin:test -PideSource=maven` |
 | Регенерация словаря | `python tools/generate_keywords.py [path-to-resources__init__.py]` (проверка: `--check`) — **только после** `exportRules`: таблицу реестров генератор читает из `rules.json` |
+| Регенерация снимка полей пользователя | `python tools/generate_user_fields.py` (проверка: `--check`) — тоже **после** `exportRules`: имена свойства `fields`, фабрики полей и класса по умолчанию берутся из `rules.json` |
 | Тесты расширения | `npm --prefix vscode-extension test` |
 | Интеграционные тесты VS Code | `npm --prefix vscode-extension run test:integration` |
 | Бандл расширения | `npm --prefix vscode-extension run compile` |
@@ -194,7 +210,9 @@ Kotlin-таблицы, потом словарь, иначе генератор 
 ```bash
 ./gradlew :idea-plugin:exportRules        # 1. Kotlin-таблицы -> shared/rules/rules.json
 python tools/generate_keywords.py         # 2. читает таблицу оттуда -> keywords.json
+python tools/generate_user_fields.py      # 3. и снимок полей модели пользователя
 ./gradlew :idea-plugin:exportRules --check && python tools/generate_keywords.py --check
+python tools/generate_user_fields.py --check
 npm --prefix vscode-extension run verify:contract
 ```
 
@@ -288,7 +306,8 @@ idea-plugin/src/test/kotlin/                       # тесты плагина
 vscode-extension/src/core/, src/vscode/            # ядро и адаптер расширения
 vscode-extension/test/                             # тесты ядра, адаптера, корпуса, интеграции
 shared/rules/, shared/keywords/, shared/fixtures/  # общие контракты
-tools/generate_keywords.py, tools/vendor/          # генератор словаря
+tools/generate_keywords.py, tools/vendor/          # генераторы словаря и снимка
+tools/generate_user_fields.py                      # полей модели пользователя
 tools/package.sh, tools/check-version.sh           # упаковка обеих реализаций
 dist/                                              # артефакты релиза (zip + vsix)
 docs/plans/, docs/insights/, arch/, mds/           # материалы для AI-агентов
@@ -331,6 +350,25 @@ docs/plans/, docs/insights/, arch/, mds/           # материалы для A
   не переписывает, в Find Usages формы она не попадает (платформа ищет по
   слову-имени, которого здесь нет), и неразрешённая форма здесь не
   подсвечивается — об этом уже сообщает диагностика на самом значении `form`.
+- **Модель пользователя: пол фреймворка плюс половина приложения.** Снимок
+  полей (`shared/keywords/user_fields.json`) — пол: без него типовой навык не
+  получил бы ничего, его `CustomUser.fields` возвращает `super().fields + []`.
+  Приложение только добавляет: элементы `fields`, `self.<имя>`, `def <имя>` и
+  имена уровня класса; голая аннотация атрибута не создаёт и объявлением не
+  считается. Цели перехода поли-вариантны и упорядочены парой «файл + смещение»
+  (по ней же дедупликация) — порядок сборки в контракт не просачивается.
+- **Корневое имя доказывается, а не предполагается.** `user` — не гарантия
+  фреймворка: имя появляется, только если приложение связало `self._user` с
+  ключом в `_get_user_data` своего параметризатора. Без доказательства работают
+  **предложения** (автодополнение, переход, usages) под контрактным дефолтом, а
+  **утверждения** — нет: WARNING выключен. Найдено доказательство обратного
+  (под дефолтным именем лежит распознанное чужое значение) — не работает ничего.
+  WARNING требует двух условий сразу: полноты словаря (ни одного гасителя во
+  всей цепочке классов) и доказанной привязки.
+- **Порядок регенерации снимков.** Сначала `exportRules` (Kotlin-таблицы →
+  `rules.json`), потом генераторы словарей: `generate_keywords.py` и
+  `generate_user_fields.py` читают из `rules.json` имена свойств и классов по
+  умолчанию. Обратный порядок возьмёт прежний снимок и разойдётся молча.
 - **Словарь ключевых слов — это пол, а не потолок.** Приложение добавляет свои
   слова через `RESOURCES` в `app_config.py`, и они работают наравне с
   фреймворковыми. Правила разбора цепочки (порт 1:1 с обеих сторон): базовые
@@ -477,6 +515,17 @@ docs/plans/, docs/insights/, arch/, mds/           # материалы для A
    (`test/integration`). Ядро оперирует смещениями, а пользователь видит
    результат адаптера: ошибки offset→`Position`, `Uri`, диапазона
    `CompletionItem` и содержимого `WorkspaceEdit` видны только здесь.
+
+**Корпус при этом гоняется на двух уровнях из трёх** — плагином и ядром
+расширения. Раннера корпуса поверх адаптера нет ни для одной фикстуры, и
+поведение адаптера закрывают точечные тесты `test/vscode/**` (пункт в бэклоге).
+Писать «все кейсы на трёх уровнях» в новых документах не надо — это неправда.
+
+**Расхождение реализаций, признанное осознанным, в корпус не пишется:** любое
+ожидание покрасит одну из сторон. Такие места живут в бэклоге и в юнит-тестах
+каждой стороны — сегодня это Find Usages по имени модели пользователя без
+объявления (в IDEA цели не существует, в VS Code имя даёт позиция каретки),
+отказ переименования и направление «каретка в `.py`».
 
 Что фиксирует корпус, а что нет: **состав** результатов (определения, диагностики,
 варианты автодополнения, токены) и **вид** варианта (`kind`) — да; **порядок**
