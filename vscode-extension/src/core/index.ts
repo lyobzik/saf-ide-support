@@ -31,7 +31,7 @@ import { categoryFor } from "./typeContext";
 import { indexEligibility } from "./indexGate";
 import { isJinja } from "./jinja";
 import { decode, rawText } from "./jsonDecode";
-import { fieldCandidates } from "./jinjaLexer";
+import { fieldCandidates, rootAccesses } from "./jinjaLexer";
 import { targetFormOf } from "./fieldRef";
 import { targetKinds } from "./refRules";
 
@@ -89,6 +89,19 @@ export interface FieldUsage extends Location {
 }
 
 /**
+ * Обращение `<root>.<member>` в выражении Jinja — **любое**, а не только к
+ * действующему корню.
+ *
+ * Корневые имена задаёт Python приложения и меняет правка параметризатора, а
+ * индекс JSON от неё не зависит: отбор по действующим корням делается на
+ * запросе. Тот же приём, что у позиций ключевых слов.
+ */
+export interface RootAccessUsage extends Location {
+  readonly root: string;
+  readonly member: string;
+}
+
+/**
  * Значение `type` — позиция ключевого слова. Хранится вместе с категорией
  * позиции: одноимённые слова разных категорий — разные слова, а
  * `undefined` (контекст не распознан) совпадает с любой категорией, ровно как
@@ -114,6 +127,7 @@ interface FileEntry {
   readonly usages: Usage[];
   readonly fieldUsages: FieldUsage[];
   readonly keywordUsages: KeywordUsage[];
+  readonly rootAccesses: RootAccessUsage[];
 }
 
 const inScope = (entry: FileEntry, scopeRoot: string | undefined): boolean =>
@@ -382,6 +396,7 @@ export class SmartAppIndex {
       fields: [],
       usages: [],
       fieldUsages: [],
+      rootAccesses: [],
       keywordUsages: [],
     };
 
@@ -525,6 +540,26 @@ export class SmartAppIndex {
     return result;
   }
 
+  /**
+   * Вхождения атрибута [name] модели пользователя в DSL-файлах приложения.
+   *
+   * Корень — любое из действующих имён [roots]: все они псевдонимы одного
+   * объекта, и вхождением считается обращение под любым из них.
+   */
+  findUserFieldUsages(name: string, roots: readonly string[], appRoot: string): Location[] {
+    const result: Location[] = [];
+    for (const entry of this.files.values()) {
+      if (entry.scopeRoot === undefined) continue;
+      if (applicationRootOf(entry.scopeRoot) !== appRoot) continue;
+      if (hasExcludedDirBelow(pathKey(entry.uri), appRoot)) continue;
+      for (const access of entry.rootAccesses) {
+        if (access.member !== name || !roots.includes(access.root)) continue;
+        result.push({ uri: access.uri, start: access.start, end: access.end });
+      }
+    }
+    return result;
+  }
+
   /** Все проиндексированные DSL-файлы — для отладки и тестов. */
   indexedUris(): string[] {
     return [...this.files.keys()];
@@ -611,6 +646,7 @@ function collectUsages(parsed: ParsedDocument, kind: RefKind, uri: string, entry
 
     if (isJinja(value)) {
       collectFieldUsages(node, parsed.text, kind, uri, entry);
+      collectRootAccesses(node, parsed.text, uri, entry);
       return;
     }
     if (value.length === 0) return;
@@ -635,6 +671,36 @@ function collectUsages(parsed: ParsedDocument, kind: RefKind, uri: string, entry
     if (propertyName(property) !== typeContext.typeProperty) return;
     entry.keywordUsages.push({ uri, start, end, name: value, category: categoryFor(property, kind) });
   });
+}
+
+/**
+ * Обращения к корневым переменным в значении. Целевая форма здесь ни при чём:
+ * какие корни действуют, решает Python приложения, и знать это на индексации
+ * файла не нужно.
+ */
+function collectRootAccesses(
+  node: Node,
+  documentText: string,
+  uri: string,
+  entry: FileEntry,
+): void {
+  const raw = rawText(documentText.slice(node.offset, node.offset + node.length));
+  if (raw === undefined) return;
+  const decoded = decode(raw);
+  for (const access of rootAccesses(decoded.text)) {
+    if (access.member === undefined) continue;
+    const start = decoded.decodedToRaw[access.memberStart as number];
+    const end = decoded.decodedToRaw[access.memberEnd as number];
+    if (start === undefined || end === undefined) continue;
+    entry.rootAccesses.push({
+      uri,
+      // +1 — открывающая кавычка литерала.
+      start: node.offset + 1 + start,
+      end: node.offset + 1 + end,
+      root: access.root,
+      member: access.member,
+    });
+  }
 }
 
 function collectFieldUsages(

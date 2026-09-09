@@ -52,9 +52,22 @@ object SmartAppUserModel {
     fun declarations(dslFile: PsiFile, name: String): List<SmartAppUserFieldElement> {
         val virtualFile = dslFile.virtualFile ?: return emptyList()
         val appRoot = SmartAppCustomKeywords.applicationRoot(virtualFile) ?: return emptyList()
-        val attribute = ofRoot(dslFile.project, appRoot)?.attributes?.get(name) ?: return emptyList()
+        return declarationsOfRoot(dslFile.project, appRoot, name)
+    }
 
-        val manager = PsiManager.getInstance(dslFile.project)
+    /**
+     * Объявления имени в приложении с корнем [appRoot]. Отдельно от
+     * [declarations] нужны поиску использований: DSL-файла под рукой там нет, а
+     * корень приложения известен.
+     */
+    fun declarationsOfRoot(
+        project: Project,
+        appRoot: VirtualFile,
+        name: String,
+    ): List<SmartAppUserFieldElement> {
+        val attribute = ofRoot(project, appRoot)?.attributes?.get(name) ?: return emptyList()
+
+        val manager = PsiManager.getInstance(project)
         val files = HashMap<String, PsiFile?>()
         return attribute.declarations.mapNotNull { site ->
             val file = files.getOrPut(site.file) {

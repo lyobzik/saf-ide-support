@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { completionAt } from "../../src/core/completion";
+import { renameEdits, renameLookupAt } from "../../src/core/rename";
 import { SmartAppIndex } from "../../src/core/index";
 import { kinds } from "../../src/core/contract";
-import { definitionsAt, diagnostics, documentContext } from "../../src/core/semantics";
+import {
+  definitionsAt,
+  diagnostics,
+  documentContext,
+  referencesAt,
+} from "../../src/core/semantics";
 
 /**
  * Семантика модели пользователя в Jinja: переход, диагностика и автодополнение
@@ -48,6 +54,16 @@ const PARAM_PY = [
   "        return data",
   "",
 ].join("\n");
+
+/** Тот же параметризатор, связавший `self._user` ещё и с псевдонимом `me`. */
+const PARAM_PY_TWO_ROOTS = PARAM_PY.replace(
+  '        data["user"] = self._user\n',
+  '        data["user"] = self._user\n        data["me"] = self._user\n',
+);
+
+/** Класс пользователя, объявивший то же имя дважды разными формами. */
+const USER_PY_TWICE =
+  USER_PY + "\n    def __init__(self):\n        super().__init__()\n        self.smart_geo = None\n";
 
 /** Тот же параметризатор, но привязки нет: корень дефолтный, утверждать нельзя. */
 const PARAM_PY_UNPROVEN = PARAM_PY.replace('        data["user"] = self._user\n', "");
@@ -169,6 +185,140 @@ describe("диагностика по модели пользователя", ()
     const index = indexWith({ [JSON_URI]: text });
     const found = diagnostics(index, documentContext(JSON_URI, text));
     expect(text.slice(found[0]?.start, found[0]?.end)).toBe("nope");
+  });
+});
+
+describe("использования атрибута модели пользователя", () => {
+  const OTHER_URI = `${APP}/static/references/scenarios/s.json`;
+  const NESTED_URI = `${APP}/subapp/static/references/behaviors/n.json`;
+  // Зависимость, вендоренная внутрь самого набора: файл — настоящий DSL-файл
+  // приложения, и отсекает его только список исключённых каталогов.
+  const VENDORED_URI = `${APP}/static/references/behaviors/venv/vendored.json`;
+  // Набор внутри venv рядом с приложением: у него свой корень приложения, и
+  // отсекает его правило владения, а не список каталогов.
+  const OUTSIDE_URI = `${APP}/venv/lib/pkg/static/references/behaviors/o.json`;
+
+  const usagesOf = (
+    text: string,
+    caret: string,
+    includeDeclaration = false,
+    extra: Record<string, string> = {},
+  ) => {
+    const index = indexWith({ [JSON_URI]: text, ...extra });
+    return referencesAt(
+      index,
+      documentContext(JSON_URI, text),
+      caretAt(text, caret),
+      includeDeclaration,
+    );
+  };
+
+  it("собирает вхождения по всем файлам приложения", () => {
+    const text = jsonWith("{{ user.smart_geo }}");
+    const other = '{ "s": { "answer": "{{ user.smart_geo }}" } }';
+    const found = usagesOf(text, "smart_geo", false, { [OTHER_URI]: other });
+    expect(found.map((f) => f.uri).sort()).toEqual([JSON_URI, OTHER_URI].sort());
+  });
+
+  it("диапазон — имя без корня и без кавычек", () => {
+    const text = jsonWith("{{ user.smart_geo }}");
+    const found = usagesOf(text, "smart_geo");
+    expect(text.slice(found[0]?.start, found[0]?.end)).toBe("smart_geo");
+  });
+
+  it("вложенное приложение — чужое", () => {
+    // `subapp` — отдельное приложение по правилу владения.
+    const text = jsonWith("{{ user.smart_geo }}");
+    const found = usagesOf(text, "smart_geo", false, {
+      [NESTED_URI]: '{ "n": { "answer": "{{ user.smart_geo }}" } }',
+      [`${APP}/subapp/app_config.py`]: CONFIG,
+    });
+    expect(found.map((f) => f.uri)).toEqual([JSON_URI]);
+  });
+
+  it("вендоренная зависимость внутри набора не считается", () => {
+    const text = jsonWith("{{ user.smart_geo }}");
+    const found = usagesOf(text, "smart_geo", false, {
+      [VENDORED_URI]: '{ "v": { "answer": "{{ user.smart_geo }}" } }',
+    });
+    expect(found.map((f) => f.uri)).toEqual([JSON_URI]);
+  });
+
+  it("набор внутри соседнего venv — чужое приложение", () => {
+    const text = jsonWith("{{ user.smart_geo }}");
+    const found = usagesOf(text, "smart_geo", false, {
+      [OUTSIDE_URI]: '{ "o": { "answer": "{{ user.smart_geo }}" } }',
+    });
+    expect(found.map((f) => f.uri)).toEqual([JSON_URI]);
+  });
+
+  it("вхождение под вторым корневым именем тоже считается", () => {
+    // `user` и `me` связаны с одним `self._user`: оба — действующие корни, и
+    // обращение под любым из них — вхождение одного и того же атрибута.
+    const text = jsonWith("{{ user.smart_geo }}");
+    const other = '{ "s": { "answer": "{{ me.smart_geo }}" } }';
+    const index = indexWith(
+      { [JSON_URI]: text, [OTHER_URI]: other },
+      PARAM_PY_TWO_ROOTS,
+    );
+    const found = referencesAt(
+      index,
+      documentContext(JSON_URI, text),
+      caretAt(text, "smart_geo"),
+      false,
+    );
+    expect(found.map((f) => f.uri).sort()).toEqual([JSON_URI, OTHER_URI].sort());
+  });
+
+  it("имя, объявленное дважды, даёт обе строки объявления", () => {
+    const text = jsonWith("{{ user.smart_geo }}");
+    const index = indexWith({ [JSON_URI]: text }, PARAM_PY, USER_PY_TWICE);
+    const found = referencesAt(
+      index,
+      documentContext(JSON_URI, text),
+      caretAt(text, "smart_geo"),
+      true,
+    );
+    expect(found.filter((f) => f.uri === USER_URI)).toHaveLength(2);
+  });
+
+  it("чужой корень вхождением не является", () => {
+    const text = jsonWith("{{ user.smart_geo }} {{ other.smart_geo }}");
+    expect(usagesOf(text, "smart_geo")).toHaveLength(1);
+  });
+
+  it("includeDeclaration добавляет строки объявления в Python", () => {
+    const text = jsonWith("{{ user.smart_geo }}");
+    const found = usagesOf(text, "smart_geo", true);
+    expect(found.map((f) => f.uri)).toContain(USER_URI);
+    expect(USER_PY.slice(found[0]?.start, found[0]?.end)).toBe("smart_geo");
+  });
+
+  it("у имени из снимка объявлений нет — список не меняется", () => {
+    const text = jsonWith("{{ user.variables }}");
+    expect(usagesOf(text, "variables", true)).toEqual(usagesOf(text, "variables", false));
+  });
+
+  it("на корневой переменной вхождений нет", () => {
+    // Имени класса в тексте DSL не существует: там псевдоним из параметризатора.
+    const text = jsonWith("{{ user.smart_geo }}");
+    expect(usagesOf(text, "user")).toEqual([]);
+  });
+});
+
+describe("переименование модели пользователя", () => {
+  it("на атрибуте и на корне переименовывать нечего", () => {
+    // Имя живёт в Python-коде и в Jinja-выражениях всех файлов приложения:
+    // переписать их согласованно мы не умеем, поэтому rename обязан отказать, а
+    // не переписать строку.
+    const text = jsonWith("{{ user.smart_geo }}");
+    const index = indexWith({ [JSON_URI]: text });
+    const context = documentContext(JSON_URI, text);
+    for (const caret of ["smart_geo", "user"]) {
+      const at = caretAt(text, caret);
+      expect(renameLookupAt(index, context, at).target, caret).toBeUndefined();
+      expect(renameEdits(index, context, at, "renamed"), caret).toEqual([]);
+    }
   });
 });
 

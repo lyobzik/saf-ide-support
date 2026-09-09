@@ -172,6 +172,11 @@ export function referencesAt(
 
   const value = node.value as string;
   if (isJinja(value)) {
+    // Проход по модели пользователя — первый и отдельный, по той же причине,
+    // что и в переходе: форменный требует известной формы (план, раздел 0).
+    const user = userOccurrencesAt(index, context, node, offset, includeDeclaration);
+    if (user !== undefined) return user;
+
     const hit = fieldHitAt(node, context, offset);
     if (hit === undefined) return [];
     return collectFieldOccurrences(index, context, hit.form, hit.field, includeDeclaration);
@@ -482,6 +487,49 @@ function userTargetsAt(
     }
   }
   return [];
+}
+
+/**
+ * Вхождения атрибута модели пользователя, если каретка стоит на его имени.
+ *
+ * `undefined` — каретка не на атрибуте: вызывающий продолжает своими ветками.
+ * Пустой список — атрибут есть, а вхождений нет, и это другой ответ.
+ *
+ * Вхождением считается `<корень>.<имя>` в значении DSL-файла того же
+ * приложения — под **любым** действующим корнем: все они псевдонимы одного
+ * объекта. С [includeDeclaration] добавляются строки объявления в Python; у
+ * имени из снимка фреймворка их нет, и список не меняется. Строка `class <Name>`
+ * в него не входит: имени класса в тексте DSL нет вовсе (план, раздел 9).
+ */
+function userOccurrencesAt(
+  index: SmartAppIndex,
+  context: DocumentContext,
+  node: Node,
+  offset: number,
+  includeDeclaration: boolean,
+): Location[] | undefined {
+  if (context.scopeRoot === undefined) return undefined;
+  const model = index.userModelOf(context.scopeRoot);
+  const roots = index.userRootOf(context.scopeRoot)?.names ?? [];
+  if (model === undefined) return undefined;
+
+  const hit = userHits(index, context, node).find(
+    (candidate) =>
+      candidate.member !== undefined &&
+      containsCaret(candidate.memberStart, candidate.memberEnd, offset),
+  );
+  const name = hit?.member;
+  if (name === undefined) return undefined;
+
+  const appRoot = applicationRootOf(context.scopeRoot);
+  const usages = index.findUserFieldUsages(name, roots, appRoot);
+  if (!includeDeclaration) return usages;
+
+  const declarations = (model.attributes.get(name)?.declarations ?? []).flatMap((site) => {
+    const uri = index.registrationUri(appRoot, site.file);
+    return uri === undefined ? [] : [{ uri, start: site.nameStart, end: site.nameEnd }];
+  });
+  return dedupe([...declarations, ...usages]);
 }
 
 /**
