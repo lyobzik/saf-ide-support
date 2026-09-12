@@ -4,6 +4,8 @@ import com.intellij.find.findUsages.FindUsagesHandler
 import com.intellij.find.findUsages.FindUsagesOptions
 import com.intellij.json.psi.JsonProperty
 import com.intellij.json.psi.JsonStringLiteral
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.search.LocalSearchScope
 import com.intellij.psi.search.SearchScope
@@ -16,6 +18,7 @@ import ru.sber.smartapp.dsl.findusages.SmartAppFindUsagesHandlerFactory
 import ru.sber.smartapp.dsl.findusages.SmartAppUserFieldUsagesHandler
 import ru.sber.smartapp.dsl.reference.SmartAppUserFieldReference
 import ru.sber.smartapp.dsl.reference.SmartAppUserVariableReference
+import java.util.concurrent.TimeUnit
 
 /**
  * Поиск использований атрибута модели пользователя: состав вхождений, их
@@ -98,12 +101,51 @@ class SmartAppUserUsagesTest : BasePlatformTestCase() {
     private fun fileNames(found: List<UsageInfo>): List<String> =
         found.mapNotNull { it.file?.name }.sorted()
 
+    /**
+     * Поиск так, как его запускает платформа: пуловый поток **без** read action
+     * (`FindUsagesManager.createUsageSearcher`). Остальные тесты зовут
+     * обработчик прямо из теста, то есть на EDT и под чтением, и потому не
+     * видят, берёт ли он read action сам.
+     */
+    private fun usagesFromPooledThread(
+        handler: FindUsagesHandler,
+        target: PsiElement,
+        options: FindUsagesOptions,
+    ): List<UsageInfo> {
+        val found = ArrayList<UsageInfo>()
+        val processor = Processor<UsageInfo> { found.add(it); true }
+        ApplicationManager.getApplication()
+            .executeOnPooledThread<Boolean> { handler.processElementUsages(target, processor, options) }
+            .get(1, TimeUnit.MINUTES)
+        return found
+    }
+
     // ---- состав вхождений ------------------------------------------------
 
     fun testUsagesAcrossApplicationFiles() {
         val first = dsl("static/references/behaviors/b.json", "{{ user.smart_geo }}")
         dsl("static/references/scenarios/s.json", "{{ user.smart_geo }}")
         assertEquals(listOf("b.json", "s.json"), fileNames(usages(targetIn(first, "smart_geo"))))
+    }
+
+    fun testSearchTakesItsOwnReadAction() {
+        // В живой IDE обработчик падал здесь на первом же обращении к
+        // `FileTypeIndex`: read access есть только внутри read action, а
+        // платформа его не даёт. Поиск умирал вместе с потоком, и Alt+F7 не
+        // показывал вообще ничего.
+        val first = dsl("static/references/behaviors/b.json", "{{ user.smart_geo }}")
+        val target = targetIn(first, "smart_geo")
+        // Второй файл добавляется ПОСЛЕ разрешения цели: он сбрасывает кэш
+        // корневого имени (зависимость — `PsiModificationTracker`), и поиск
+        // считает его заново уже на пуловом потоке — как в живой IDE. Ассерта
+        // на этом пути сегодня нет, так что зелёный тест read action вокруг
+        // `SmartAppUserRoot` не доказывает; он держит обход индекса и PSI.
+        dsl("static/references/scenarios/s.json", "{{ user.smart_geo }}")
+        val options = FindUsagesOptions(project).apply { isUsages = true }
+
+        val found = usagesFromPooledThread(handlerFor(target), target, options)
+
+        assertEquals(listOf("b.json", "s.json"), fileNames(found))
     }
 
     fun testUsageRangeCoversOnlyTheName() {

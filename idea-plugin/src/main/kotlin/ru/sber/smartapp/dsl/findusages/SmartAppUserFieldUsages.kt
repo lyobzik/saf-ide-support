@@ -4,6 +4,7 @@ import com.intellij.find.findUsages.FindUsagesHandler
 import com.intellij.find.findUsages.FindUsagesOptions
 import com.intellij.json.JsonFileType
 import com.intellij.json.psi.JsonStringLiteral
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.vfs.VirtualFile
@@ -113,26 +114,42 @@ class SmartAppUserFieldUsagesHandler(
         // сколько у имени строк объявления, и приложение обошлось бы дважды.
         if (element != target.declaration) return true
         val project = target.declaration.project
-        // Обход опирается на FileTypeIndex; в dumb mode он недоступен, а само
-        // действие платформа в это время и не предлагает.
-        if (DumbService.isDumb(project)) return true
 
-        val roots = SmartAppUserRoot.ofRoot(project, target.appRoot)?.names.orEmpty()
+        // Платформа зовёт метод на пуловом потоке и **без** read action, поэтому
+        // каждое обращение к индексу, кэшу и PSI берёт его само. Read action на
+        // файл, а не один на весь обход: под длинным чтением не может начаться
+        // запись, и редактор встаёт на всё время поиска.
+        val roots = runReadAction {
+            // Обход опирается на FileTypeIndex; в dumb mode он недоступен, а само
+            // действие платформа в это время и не предлагает.
+            if (DumbService.isDumb(project)) emptyList()
+            else SmartAppUserRoot.ofRoot(project, target.appRoot)?.names.orEmpty()
+        }
         if (roots.isEmpty()) return true
+
+        val files = runReadAction {
+            FileTypeIndex.getFiles(JsonFileType.INSTANCE, candidateScope(options)).toList()
+        }
 
         // Локальная область («в текущем файле», подсветка вхождений) ограничивает
         // не файлы, а элементы, поэтому она проверяется дважды: файлы — через
         // приведение к глобальной, конкретное вхождение — по диапазону.
         val local = options.searchScope as? LocalSearchScope
         val manager = PsiManager.getInstance(project)
-        for (virtualFile in FileTypeIndex.getFiles(JsonFileType.INSTANCE, candidateScope(options))) {
+        for (virtualFile in files) {
             ProgressManager.checkCanceled()
-            // Вид файла — до всякого разбора PSI: каталог приложения рекурсивен,
-            // и обычный `config.json` рядом с кодом в него тоже попадает.
-            if (SmartAppFiles.kindOf(virtualFile) == null) continue
-            if (!isOwnFile(virtualFile)) continue
-            val psiFile = manager.findFile(virtualFile) ?: continue
-            if (!processFile(psiFile, roots, local, processor)) return false
+            val proceed = runReadAction {
+                // Список собран под другим read action: файл мог быть удалён в
+                // промежутке, а `findFile` на невалидном файле бросает.
+                if (!virtualFile.isValid) return@runReadAction true
+                // Вид файла — до всякого разбора PSI: каталог приложения рекурсивен,
+                // и обычный `config.json` рядом с кодом в него тоже попадает.
+                if (SmartAppFiles.kindOf(virtualFile) == null) return@runReadAction true
+                if (!isOwnFile(virtualFile)) return@runReadAction true
+                val psiFile = manager.findFile(virtualFile) ?: return@runReadAction true
+                processFile(psiFile, roots, local, processor)
+            }
+            if (!proceed) return false
         }
         return true
     }

@@ -3,6 +3,7 @@ package ru.sber.smartapp.dsl.resources
 import com.intellij.find.findUsages.FindUsagesHandlerFactory
 import com.intellij.json.psi.JsonProperty
 import com.intellij.json.psi.JsonStringLiteral
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.search.LocalSearchScope
@@ -17,6 +18,7 @@ import ru.sber.smartapp.dsl.findusages.SmartAppCustomKeywordTargets
 import ru.sber.smartapp.dsl.findusages.SmartAppCustomKeywordUsagesHandler
 import ru.sber.smartapp.dsl.findusages.SmartAppFindUsagesHandlerFactory
 import ru.sber.smartapp.dsl.reference.SmartAppCustomKeywordReference
+import java.util.concurrent.TimeUnit
 
 /**
  * Переход со значения `type` на строку регистрации в Python-коде приложения и
@@ -169,6 +171,29 @@ class SmartAppCustomKeywordNavigationTest : BasePlatformTestCase() {
         assertEquals(
             listOf("actions.json" to "custom_action", "main.json" to "custom_action"),
             describe(myFixture.findUsages(element)),
+        )
+    }
+
+    fun testSearchTakesItsOwnReadAction() {
+        // Платформа запускает поиск на пуловом потоке и **без** read action
+        // (`FindUsagesManager.createUsageSearcher`), а `myFixture.findUsages`
+        // зовёт обработчик на EDT под чтением — и потому не видит, берёт ли он
+        // read action сам. В живой IDE обработчик падал на первом же обращении
+        // к `FileTypeIndex`, поиск умирал вместе с потоком, и Alt+F7 не
+        // показывал вообще ничего.
+        val target = singleTarget("static/references/actions/actions.json", "custom_action")
+        val handler = handlerFor(target)
+        val options = handler.findUsagesOptions
+        val found = ArrayList<UsageInfo>()
+        val processor = Processor<UsageInfo> { found.add(it); true }
+
+        ApplicationManager.getApplication()
+            .executeOnPooledThread<Boolean> { handler.processElementUsages(target, processor, options) }
+            .get(1, TimeUnit.MINUTES)
+
+        assertEquals(
+            listOf("actions.json" to "custom_action", "main.json" to "custom_action"),
+            describe(found),
         )
     }
 
