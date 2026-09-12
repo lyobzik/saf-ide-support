@@ -2,7 +2,7 @@
   "name": "smartapp-dsl",
   "displayName": "SmartApp DSL",
   "description": "Поддержка DSL-сценариев Sber SmartApp Framework: навигация, автодополнение, подсветка и диагностика в static/references/**/*.json",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "ru-sber-smartapp",
   "license": "MIT",
   "engines": {
