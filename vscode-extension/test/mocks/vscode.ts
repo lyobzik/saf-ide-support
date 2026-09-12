@@ -182,6 +182,29 @@ export const workspace = {
   textDocuments: [] as TextDocument[],
 };
 
+/**
+ * Команды редактора. Адаптер спрашивает `vscode.executeDefinitionProvider`, где
+ * объявлен символ под кареткой, — в живом VS Code отвечает Python-расширение, в
+ * тесте ответ задаётся здесь.
+ */
+export const commandsControl = {
+  definitions: [] as unknown[],
+  calls: [] as { command: string; args: unknown[] }[],
+
+  reset(): void {
+    this.definitions = [];
+    this.calls = [];
+  },
+};
+
+export const commands = {
+  async executeCommand<T>(command: string, ...args: unknown[]): Promise<T | undefined> {
+    commandsControl.calls.push({ command, args });
+    if (command === "vscode.executeDefinitionProvider") return commandsControl.definitions as T;
+    return undefined;
+  },
+};
+
 export const languages = {
   createDiagnosticCollection: (_name: string): DiagnosticCollection => new DiagnosticCollection(),
 };

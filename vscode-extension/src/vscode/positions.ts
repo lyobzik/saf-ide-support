@@ -23,6 +23,22 @@ export function offsetToPosition(text: string, offset: number): vscode.Position 
   return new vscode.Position(line, clamped - lineStart);
 }
 
+/**
+ * Смещение в тексте для позиции — обратное [offsetToPosition]. Символ за концом
+ * строки прижимается к её концу: позиция не должна перетекать на следующую.
+ */
+export function positionToOffset(text: string, position: vscode.Position): number {
+  let lineStart = 0;
+  for (let line = 0; line < position.line; line++) {
+    const newline = text.indexOf("\n", lineStart);
+    if (newline < 0) return text.length;
+    lineStart = newline + 1;
+  }
+  const newline = text.indexOf("\n", lineStart);
+  const lineEnd = newline < 0 ? text.length : newline;
+  return Math.min(lineStart + position.character, lineEnd);
+}
+
 export function rangeOf(text: string, start: number, end: number): vscode.Range {
   return new vscode.Range(offsetToPosition(text, start), offsetToPosition(text, end));
 }

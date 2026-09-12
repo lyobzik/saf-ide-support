@@ -167,6 +167,70 @@ describe("SmartApp DSL в VS Code", () => {
     assert.ok(locations.some((location) => location.uri.path.endsWith("scenarios/main.json")));
   });
 
+  it("находит строки DSL от класса в Python-файле", async () => {
+    // Python-расширения в тестовом VS Code нет, поэтому здесь проверяется
+    // запасной путь — каретка на имени в самом `class X`. Путь через объявление
+    // символа закрывают тесты адаптера с подменённой командой; здесь важно, что
+    // провайдер вообще зарегистрирован для `.py`.
+    const document = await openWorkspaceFile("app/basic_entities/actions.py");
+    assert.equal(document.languageId, "python", "VS Code не распознал .py как python");
+    const locations = await waitFor(
+      () =>
+        vscode.commands.executeCommand<vscode.Location[]>(
+          "vscode.executeReferenceProvider",
+          document.uri,
+          positionOf(document, "CustomAction", 2),
+        ),
+      (found) => (found ?? []).some((location) => location.uri.path.endsWith("actions/actions.json")),
+    );
+    assert.ok(locations.some((location) => location.uri.path.endsWith("actions/actions.json")));
+  });
+
+  it("дополняет ссылки другого провайдера для python, а не заменяет их", async () => {
+    // Роль Python-расширения играют провайдеры, зарегистрированные самим тестом:
+    // настоящего Pylance в тестовом VS Code нет. Здесь видно то, чего не видят
+    // адаптерные тесты: склеивает ли VS Code ответы провайдеров и доходит ли
+    // `executeDefinitionProvider` из нашего провайдера до чужого.
+    const entities = await openWorkspaceFile("app/basic_entities/actions.py");
+    const nameStart = positionOf(entities, "CustomAction");
+    const resources = await openWorkspaceFile("app/resources/custom_app_resources.py");
+    const caret = positionOf(resources, "= CustomAction", 4);
+    const selector: vscode.DocumentSelector = { language: "python", scheme: "file" };
+    const foreignReference = new vscode.Location(resources.uri, caret);
+    const registrations = [
+      vscode.languages.registerDefinitionProvider(selector, {
+        provideDefinition: () => [
+          new vscode.Location(
+            entities.uri,
+            new vscode.Range(nameStart, nameStart.translate(0, "CustomAction".length)),
+          ),
+        ],
+      }),
+      vscode.languages.registerReferenceProvider(selector, {
+        provideReferences: () => [foreignReference],
+      }),
+    ];
+    try {
+      // Каретка на строке регистрации: запасной путь по каретке здесь ничего не
+      // нашёл бы, так что строка DSL в ответе означает, что сработало объявление.
+      const locations = await waitFor(
+        () =>
+          vscode.commands.executeCommand<vscode.Location[]>(
+            "vscode.executeReferenceProvider",
+            resources.uri,
+            caret,
+          ),
+        (found) => (found ?? []).some((location) => location.uri.path.endsWith("actions/actions.json")),
+      );
+      assert.ok(
+        locations.some((location) => location.uri.path.endsWith("custom_app_resources.py")),
+        `ссылка другого провайдера пропала из ответа: ${locations.map((l) => l.uri.path).join(", ")}`,
+      );
+    } finally {
+      for (const registration of registrations) registration.dispose();
+    }
+  });
+
   it("предлагает имена форм в позиции form", async () => {
     // hello_form есть и в тексте документа, поэтому ждём именно наш вариант:
     // ссылку на сущность, а не совпавшее слово.

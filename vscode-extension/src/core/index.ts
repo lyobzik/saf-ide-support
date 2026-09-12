@@ -271,6 +271,15 @@ export class SmartAppIndex {
   }
 
   /**
+   * Ключевые слова приложения с корнем [appRoot]. Нужен запросам, у которых
+   * набора `references` под рукой нет: каретка стоит в Python-файле, и корень
+   * приложения известен только по его пути (`ownerApplicationRoot`).
+   */
+  customKeywordsOfApplication(appRoot: string): readonly CustomKeyword[] {
+    return this.appPythonOfRoot(appRoot)?.keywords ?? [];
+  }
+
+  /**
    * Разобранный Python приложения набора [scopeRoot].
    *
    * Читаются только файлы, которыми владеет это же приложение: вложенный
@@ -278,13 +287,17 @@ export class SmartAppIndex {
    */
   private appPythonOf(scopeRoot: string | undefined): AppPython | undefined {
     if (scopeRoot === undefined) return undefined;
+    return this.appPythonOfRoot(applicationRootOf(scopeRoot));
+  }
+
+  /** Разобранный Python приложения с корнем [appRoot]. */
+  private appPythonOfRoot(appRoot: string): AppPython | undefined {
     // До готовности и во время сканирования разбор неполон: молчим, как и
     // остальные запросы, зависящие от индекса.
     if (!this.ready || this.pythonScans > 0) return undefined;
     // Корни считаются первыми: их изменение сбрасывает кэш, и только после
     // этого можно смотреть в него.
     const roots = this.applicationRoots();
-    const appRoot = applicationRootOf(scopeRoot);
     const cached = this.appCache.get(appRoot);
     if (cached !== undefined) return cached;
 

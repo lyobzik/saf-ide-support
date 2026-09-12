@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { isDslFile } from "../core/files";
 import {
   SEMANTIC_TOKEN_LEGEND,
+  createClassReferenceProvider,
   createCompletionProvider,
   createDefinitionProvider,
   createReferenceProvider,
@@ -25,6 +26,13 @@ const JSON_SELECTOR: vscode.DocumentSelector = [
   { language: "json", scheme: "untitled" },
 ];
 
+/**
+ * В Python-файлах приложения — только поиск использований класса. Язык `python`
+ * регистрирует сам VS Code, так что провайдер работает и без Python-расширения —
+ * в урезанном виде (см. `createClassReferenceProvider`).
+ */
+const PYTHON_SELECTOR: vscode.DocumentSelector = [{ language: "python", scheme: "file" }];
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const workspace = new SmartAppWorkspace();
   const diagnostics = vscode.languages.createDiagnosticCollection("smartapp-dsl");
@@ -34,6 +42,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     diagnostics,
     vscode.languages.registerDefinitionProvider(JSON_SELECTOR, createDefinitionProvider(workspace)),
     vscode.languages.registerReferenceProvider(JSON_SELECTOR, createReferenceProvider(workspace)),
+    vscode.languages.registerReferenceProvider(
+      PYTHON_SELECTOR,
+      createClassReferenceProvider(workspace),
+    ),
     vscode.languages.registerRenameProvider(JSON_SELECTOR, createRenameProvider(workspace)),
     vscode.languages.registerDocumentSemanticTokensProvider(
       JSON_SELECTOR,

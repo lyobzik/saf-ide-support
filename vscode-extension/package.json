@@ -14,7 +14,8 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:json"
+    "onLanguage:json",
+    "onLanguage:python"
   ],
   "contributes": {
     "semanticTokenTypes": [

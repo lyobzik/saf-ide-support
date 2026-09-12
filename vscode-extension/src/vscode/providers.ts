@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { classKeywordUsages, classKeywordUsagesAtCaret } from "../core/classUsages";
 import { completionAt, type CompletionKind } from "../core/completion";
 import type { Location } from "../core/index";
 import { renameEdits, renameLookupAt } from "../core/rename";
@@ -10,7 +11,7 @@ import {
   referencesAt,
   type DocumentContext,
 } from "../core/semantics";
-import { offsetToPosition, rangeOf } from "./positions";
+import { offsetToPosition, positionToOffset, rangeOf } from "./positions";
 import type { SmartAppWorkspace } from "./workspace";
 
 /**
@@ -77,6 +78,81 @@ export function createReferenceProvider(workspace: SmartAppWorkspace): vscode.Re
       return toVsLocations(workspace, found);
     },
   };
+}
+
+/**
+ * Поиск использований класса в Python-файле: к ссылкам, которые находит
+ * Python-расширение, добавляются строки DSL со словами, под которыми класс
+ * зарегистрирован. Порт `SmartAppKeywordClassUsagesSearcher`: VS Code склеивает
+ * ответы всех провайдеров, поэтому этот провайдер дополняет чужой результат, а не
+ * заменяет его.
+ *
+ * Класс ищется так же, как его отдаёт платформа в IDEA, — по объявлению символа
+ * под кареткой. Объявление сообщает Python-расширение
+ * (`vscode.executeDefinitionProvider`), и поиск работает с любого места, где стоит
+ * имя: с `class X`, с импорта, со строки регистрации. Без Python-расширения
+ * объявлений нет, и остаётся одна точка — каретка на имени в самом `class X`.
+ */
+export function createClassReferenceProvider(
+  workspace: SmartAppWorkspace,
+): vscode.ReferenceProvider {
+  return {
+    async provideReferences(document, position) {
+      // Ключ — файл и начало: одно объявление может прийти несколькими
+      // ответами (класс и импорт, `Location` и `LocationLink` от разных
+      // провайдеров), а вхождение в списке должно стоять один раз.
+      const found = new Map<string, Location>();
+      const add = (locations: readonly Location[]): void => {
+        for (const location of locations) found.set(`${location.uri}\n${location.start}`, location);
+      };
+
+      const declarations = await declarationsAt(document, position);
+      for (const declaration of declarations) {
+        const text =
+          declaration.uri === document.uri.toString()
+            ? document.getText()
+            : workspace.textOf(declaration.uri);
+        if (text === undefined) continue;
+        add(
+          classKeywordUsages(
+            workspace.index,
+            declaration.uri,
+            text,
+            positionToOffset(text, declaration.range.start),
+            positionToOffset(text, declaration.range.end),
+          ),
+        );
+      }
+      if (declarations.length === 0) {
+        add(
+          classKeywordUsagesAtCaret(
+            workspace.index,
+            document.uri.toString(),
+            document.getText(),
+            document.offsetAt(position),
+          ),
+        );
+      }
+      return toVsLocations(workspace, [...found.values()]);
+    },
+  };
+}
+
+/** Объявления символа под кареткой — по данным Python-расширения, если оно есть. */
+async function declarationsAt(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+): Promise<{ uri: string; range: vscode.Range }[]> {
+  const found = await vscode.commands.executeCommand<
+    (vscode.Location | vscode.LocationLink)[] | undefined
+  >("vscode.executeDefinitionProvider", document.uri, position);
+  return (found ?? []).map((item) =>
+    "targetUri" in item
+      ? // Берётся объявление целиком: имя класса лежит внутри него, а
+        // необязательный `targetSelectionRange` к ответу ничего не добавляет.
+        { uri: item.targetUri.toString(), range: item.targetRange }
+      : { uri: item.uri.toString(), range: item.range },
+  );
 }
 
 export function createCompletionProvider(workspace: SmartAppWorkspace): vscode.CompletionItemProvider {
