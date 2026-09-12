@@ -140,6 +140,38 @@ object SmartAppCustomKeywordTargets {
         val single = matching.singleOrNull() ?: return null
         return ofRegistration(single)
     }
+
+    /**
+     * Цели по имени класса: действующие регистрации приложения, у которых
+     * правая часть — этот идентификатор. Так Find Usages на самом классе в
+     * Python-коде находит вхождения слов, под которыми класс зарегистрирован.
+     *
+     * Целей бывает несколько: один класс регистрируют под разными словами
+     * (и в разных категориях), а вхождения у каждого слова свои. Одинаковые
+     * имена сливаются в одну цель — это то же слово, найденное в нескольких
+     * категориях.
+     *
+     * Сравнение чисто текстовое: сканер запоминает правую часть регистрации как
+     * идентификатор и импорты для неё не разрешает. Значит, два одноимённых
+     * класса из разных модулей одного приложения неразличимы, и Alt+F7 на любом
+     * из них покажет вхождения обоих слов.
+     */
+    fun ofClassName(
+        project: Project,
+        appRoot: VirtualFile,
+        className: String,
+    ): List<SmartAppCustomKeywordTarget> =
+        SmartAppCustomKeywords.registrationsOfRoot(project, appRoot)
+            .filter { it.keyword.className == className }
+            .groupBy { it.keyword.name }
+            .map { (name, registrations) ->
+                SmartAppCustomKeywordTarget(
+                    name = name,
+                    categories = registrations.map { it.keyword.category }.toSet(),
+                    appRoot = appRoot,
+                    declarations = registrations,
+                )
+            }
 }
 
 /**
@@ -150,16 +182,15 @@ object SmartAppCustomKeywordTargets {
  * каталогом приложения и прерывается по `checkCanceled`. Позицию распознаёт тот
  * же [SmartAppTypeContext], что и подсветка, — источник правды один.
  */
-class SmartAppCustomKeywordUsagesHandler(
+class SmartAppCustomKeywordSearch(
     private val target: SmartAppCustomKeywordTarget,
-) : FindUsagesHandler(target.declaration) {
+) {
 
-    override fun processElementUsages(
-        element: PsiElement,
-        processor: Processor<in UsageInfo>,
+    /** `false` — потребитель попросил остановиться. */
+    fun run(
         options: FindUsagesOptions,
+        processor: Processor<in UsageInfo>,
     ): Boolean {
-        if (!options.isUsages) return true
         val project = target.declaration.project
 
         // Платформа зовёт метод на пуловом потоке и **без** read action, поэтому
@@ -281,4 +312,29 @@ class SmartAppCustomKeywordUsagesHandler(
             else -> application
         }
     }
+}
+
+/**
+ * Find Usages для ключевого слова приложения. Сам поиск живёт в
+ * [SmartAppCustomKeywordSearch]: тем же обходом пользуется
+ * [SmartAppKeywordClassUsagesSearcher], которому handler не нужен — он
+ * дополняет чужой поиск, а не заменяет его.
+ */
+class SmartAppCustomKeywordUsagesHandler(
+    target: SmartAppCustomKeywordTarget,
+) : FindUsagesHandler(target.declaration) {
+
+    private val search = SmartAppCustomKeywordSearch(target)
+
+    override fun processElementUsages(
+        element: PsiElement,
+        processor: Processor<in UsageInfo>,
+        options: FindUsagesOptions,
+    ): Boolean {
+        if (!options.isUsages) return true
+        return search.run(options, processor)
+    }
+
+    /** Делегат к [SmartAppCustomKeywordSearch.candidateScope] — его проверяют тесты. */
+    fun candidateScope(options: FindUsagesOptions): GlobalSearchScope = search.candidateScope(options)
 }

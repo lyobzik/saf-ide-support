@@ -1,22 +1,29 @@
 package ru.sber.smartapp.dsl.resources
 
+import com.intellij.find.findUsages.CustomUsageSearcher
 import com.intellij.find.findUsages.FindUsagesHandlerFactory
+import com.intellij.find.findUsages.FindUsagesOptions
 import com.intellij.json.psi.JsonProperty
 import com.intellij.json.psi.JsonStringLiteral
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.search.LocalSearchScope
 import com.intellij.psi.search.SearchScope
+import com.intellij.psi.impl.FakePsiElement
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.DumbModeTestUtils
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.usageView.UsageInfo
+import com.intellij.usages.UsageInfo2UsageAdapter
 import com.intellij.util.IncorrectOperationException
 import com.intellij.util.Processor
 import ru.sber.smartapp.dsl.findusages.SmartAppCustomKeywordTargets
 import ru.sber.smartapp.dsl.findusages.SmartAppCustomKeywordUsagesHandler
 import ru.sber.smartapp.dsl.findusages.SmartAppFindUsagesHandlerFactory
+import ru.sber.smartapp.dsl.findusages.SmartAppKeywordClassUsagesSearcher
 import ru.sber.smartapp.dsl.reference.SmartAppCustomKeywordReference
 import java.util.concurrent.TimeUnit
 
@@ -38,16 +45,19 @@ class SmartAppCustomKeywordNavigationTest : BasePlatformTestCase() {
             "    def init_actions(self):\n" +
             "        actions[\"custom_action\"] = CustomAction\n" +
             "        actions[\"shared\"] = SharedAction\n" +
+            "        actions[\"dual\"] = Dual\n" +
+            "        actions[\"Weird\"] = Weird\n" +
             "\n" +
             "    def init_requirements(self):\n" +
-            "        requirements[\"shared\"] = SharedRequirement\n"
+            "        requirements[\"shared\"] = SharedRequirement\n" +
+            "        requirements[\"dual\"] = Dual\n"
 
     override fun setUp() {
         super.setUp()
         application("")
         myFixture.addFileToProject(
             "static/references/actions/actions.json",
-            """{ "a": { "type": "custom_action" }, "b": { "type": "shared" } }""",
+            """{ "a": { "type": "custom_action" }, "b": { "type": "shared" }, "w": { "type": "Weird" } }""",
         )
         myFixture.addFileToProject(
             "static/references/scenarios/main.json",
@@ -195,6 +205,80 @@ class SmartAppCustomKeywordNavigationTest : BasePlatformTestCase() {
             listOf("actions.json" to "custom_action", "main.json" to "custom_action"),
             describe(found),
         )
+    }
+
+    // ---- поиск по классу в Python-коде -----------------------------------
+
+    fun testClassSearcherIsRegisteredInManifest() {
+        // Остальные тесты этой группы зовут поисковик напрямую и поэтому
+        // зелены даже при опечатке в plugin.xml — а незарегистрированный EP
+        // означает, что в живой IDE не работает ничего.
+        assertNotNull(
+            CustomUsageSearcher.EP_NAME.extensionList
+                .firstOrNull { it is SmartAppKeywordClassUsagesSearcher },
+        )
+    }
+
+    fun testClassNameTargetsItsRegistration() {
+        val targets = SmartAppCustomKeywordTargets.ofClassName(project, appRoot(), "CustomAction")
+        assertEquals(listOf("custom_action" to setOf("action")), targets.map { it.name to it.categories })
+    }
+
+    fun testClassRegisteredTwiceUnderOneNameIsOneTarget() {
+        // `Dual` зарегистрирован под именем `dual` и как действие, и как
+        // требование. Это одно слово в двух категориях, а не два слова: иначе
+        // поиск обошёл бы приложение дважды и в позиции с нераспознанной
+        // категорией вернул бы каждое вхождение по два раза.
+        val targets = SmartAppCustomKeywordTargets.ofClassName(project, appRoot(), "Dual")
+        assertEquals(listOf("dual" to setOf("action", "requirement")), targets.map { it.name to it.categories })
+    }
+
+    fun testUnregisteredClassNameHasNoTargets() {
+        assertEmpty(SmartAppCustomKeywordTargets.ofClassName(project, appRoot(), "SomeOtherClass"))
+    }
+
+    fun testClassUsagesAreFoundInJson() {
+        assertEquals(
+            listOf("actions.json" to "custom_action", "main.json" to "custom_action"),
+            classUsages("CustomAction"),
+        )
+    }
+
+    fun testClassUsagesRespectCategoryOfItsRegistration() {
+        // `SharedAction` и `SharedRequirement` зарегистрированы под одним и тем
+        // же словом `shared`, но в разных категориях. Если поиск по классу берёт
+        // одно имя и игнорирует категорию, оба класса найдут оба вхождения.
+        assertEquals(listOf("actions.json" to "shared"), classUsages("SharedAction"))
+        assertEquals(listOf("main.json" to "shared"), classUsages("SharedRequirement"))
+    }
+
+    fun testSameNamedFunctionIsNotAClass() {
+        // Совпадения имени мало: функция `CustomAction` — не тот класс, под
+        // которым зарегистрировано слово, и вхождений DSL у неё нет.
+        assertEmpty(
+            declarationUsages("app/basic_entities/helpers.py", "def CustomAction():\n    pass\n", "CustomAction"),
+        )
+    }
+
+    fun testSameNamedVariableIsNotAClass() {
+        assertEmpty(declarationUsages("app/basic_entities/consts.py", "CustomAction = 1\n", "CustomAction"))
+    }
+
+    fun testClassInsideDependencyDirectoryIsForeign() {
+        // Вендоренная зависимость лежит внутри каталога приложения, и владение
+        // её не отсекает — отсекает список исключённых каталогов. Тот же фильтр
+        // действует на обходе JSON, и цель обязана проходить его наравне.
+        assertEmpty(classUsages("CustomAction", "venv/lib/python3.12/site-packages/vendor/actions.py"))
+    }
+
+    fun testRegistrationElementIsNotSearchedAsAClass() {
+        // `Weird` зарегистрирован под собственным именем класса — так в бою
+        // пишут. Каретка на слове в JSON приводит платформу к fake-элементу
+        // регистрации: имя и файл `.py` у него есть, но объявления класса в его
+        // диапазоне нет. Поиск по классу обязан промолчать, иначе вхождения,
+        // уже добавленные handler'ом, попали бы в список дважды.
+        val target = singleTarget("static/references/actions/actions.json", "Weird")
+        assertEmpty(usagesOf(target))
     }
 
     fun testFindUsagesFromRegistrationElement() {
@@ -354,6 +438,61 @@ class SmartAppCustomKeywordNavigationTest : BasePlatformTestCase() {
         val options = handler.findUsagesOptions.also { it.searchScope = scope }
         val found = ArrayList<UsageInfo>()
         handler.processElementUsages(target, Processor { found.add(it); true }, options)
+        return describe(found)
+    }
+
+    /** Корень приложения фикстуры. */
+    private fun appRoot(): VirtualFile =
+        SmartAppCustomKeywords.ownerApplicationRoot(
+            myFixture.findFileInTempDir("app/resources/custom_app_resources.py"),
+        ) ?: error("приложение не определилось")
+
+    /**
+     * Подставное объявление в Python-коде под кареткой. Настоящего `PyClass` в
+     * тестовой платформе не бывает — плагина Python в ней нет, и `.py` там
+     * обычный текст. Элемент воспроизводит ровно то, что читает поисковик: имя,
+     * файл и диапазон объявления; стык «платформа отдала нам `PyClass`»
+     * проверяется вручную.
+     */
+    private class PythonElement(
+        private val file: PsiFile,
+        private val elementName: String,
+        private val range: TextRange,
+    ) : FakePsiElement() {
+        override fun getParent(): PsiElement = file
+        override fun getContainingFile(): PsiFile = file
+        override fun getName(): String = elementName
+        override fun getTextRange(): TextRange = range
+        override fun setName(name: String): PsiElement = throw IncorrectOperationException()
+    }
+
+    /** Вхождения, которые поисковик добавляет к поиску класса [className]. */
+    private fun classUsages(
+        className: String,
+        path: String = "app/basic_entities/${className.lowercase()}.py",
+    ): List<Pair<String, String>> = declarationUsages(path, "class $className:\n    pass\n", className)
+
+    /**
+     * Вхождения для объявления [name], занимающего в файле [path] весь текст
+     * [text]: у `PyClass` и `PyFunction` диапазон покрывает объявление целиком.
+     */
+    private fun declarationUsages(
+        path: String,
+        text: String,
+        name: String,
+    ): List<Pair<String, String>> {
+        val file = myFixture.addFileToProject(path, text)
+        return usagesOf(PythonElement(file, name, TextRange(0, text.length)))
+    }
+
+    /** Вхождения, которые поисковик добавляет для элемента [element]. */
+    private fun usagesOf(element: PsiElement): List<Pair<String, String>> {
+        val found = ArrayList<UsageInfo>()
+        SmartAppKeywordClassUsagesSearcher().processElementUsages(
+            element,
+            Processor { usage -> found.add((usage as UsageInfo2UsageAdapter).usageInfo); true },
+            FindUsagesOptions(project).apply { isUsages = true },
+        )
         return describe(found)
     }
 

@@ -49,6 +49,9 @@
         <findUsagesHandlerFactory
             implementation="ru.sber.smartapp.dsl.findusages.SmartAppFindUsagesHandlerFactory"/>
 
+        <customUsageSearcher
+            implementation="ru.sber.smartapp.dsl.findusages.SmartAppKeywordClassUsagesSearcher"/>
+
         <elementDescriptionProvider
             implementation="ru.sber.smartapp.dsl.findusages.SmartAppElementDescriptionProvider"/>
 
