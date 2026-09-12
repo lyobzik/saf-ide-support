@@ -226,9 +226,11 @@ class SmartAppCustomKeywordNavigationTest : BasePlatformTestCase() {
 
     fun testClassRegisteredTwiceUnderOneNameIsOneTarget() {
         // `Dual` зарегистрирован под именем `dual` и как действие, и как
-        // требование. Это одно слово в двух категориях, а не два слова: иначе
-        // поиск обошёл бы приложение дважды и в позиции с нераспознанной
-        // категорией вернул бы каждое вхождение по два раза.
+        // требование. Это одно слово в двух категориях, а не два слова: одна
+        // цель со всеми категориями обходит приложение один раз, а не по разу
+        // на категорию. Дублей в списке раздельные цели не дали бы — у позиции
+        // в DSL-файле категория определена всегда, — поэтому тест держит
+        // именно форму цели.
         val targets = SmartAppCustomKeywordTargets.ofClassName(project, appRoot(), "Dual")
         assertEquals(listOf("dual" to setOf("action", "requirement")), targets.map { it.name to it.categories })
     }
